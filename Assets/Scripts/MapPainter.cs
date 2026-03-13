@@ -65,7 +65,10 @@ public class MapPainter : MonoBehaviour
 
     void OnEnable()
     {
-        if (autoGenerateOnEnable)
+        // Keep heavy map/procedural prop generation in edit mode only.
+        // Running this on play start can stall startup if many generated props
+        // are queued for deferred destruction.
+        if (autoGenerateOnEnable && !Application.isPlaying)
         {
             Paint();
         }
