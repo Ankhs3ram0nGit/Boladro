@@ -49,7 +49,6 @@ public class MapPainter : MonoBehaviour
 
     private static readonly string[] RequestedRockNames =
     {
-        "TX Props Stone T7",
         "TX Props - Stone 02",
         "TX Props - Stone 03",
         "TX Props - Stone 04",
