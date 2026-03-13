@@ -1024,7 +1024,7 @@ public class TreeHoverSelector : MonoBehaviour
             Mathf.Max(0.02f, woodDropFallDurationMin),
             Mathf.Max(Mathf.Max(0.02f, woodDropFallDurationMin), woodDropFallDurationMax));
 
-        float typeScaleBoost = string.Equals(itemId, "stone", StringComparison.OrdinalIgnoreCase) ? 2f : 1f;
+        float typeScaleBoost = string.Equals(itemId, "stone", StringComparison.OrdinalIgnoreCase) ? 3f : 1f;
         Vector3 dropScale = Vector3.one * Mathf.Max(0.01f, woodDropScale * 2f * typeScaleBoost);
         drop.transform.localScale = dropScale;
 
