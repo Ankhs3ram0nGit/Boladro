@@ -418,6 +418,10 @@ public class OverworldCreatureSpawner : MonoBehaviour
             ApplyOverworldDefinitionScale(newObj.transform, def, sprite);
         }
 
+        EnsureWildSortingLayer(newObj);
+        EnsureWildCollision(newObj, sr);
+        EnsureWildTopDownSorter(newObj);
+
         WhelplingBounceAnimator bounce = newObj.GetComponent<WhelplingBounceAnimator>();
         if (bounce != null)
         {
@@ -619,6 +623,8 @@ public class OverworldCreatureSpawner : MonoBehaviour
         runtimeTemplate.SetActive(false);
         SpriteRenderer sr = runtimeTemplate.AddComponent<SpriteRenderer>();
         runtimeTemplate.AddComponent<TopDownSorter>();
+        runtimeTemplate.AddComponent<Rigidbody2D>();
+        runtimeTemplate.AddComponent<CapsuleCollider2D>();
         runtimeTemplate.AddComponent<CreatureHealth>();
         runtimeTemplate.AddComponent<CreatureCombatant>().autoInitWhelpling = false;
         runtimeTemplate.AddComponent<WildCreatureAI>();
@@ -782,6 +788,99 @@ public class OverworldCreatureSpawner : MonoBehaviour
         }
 
         return Mathf.Max(0.05f, fallbackSpawnScaleBaseline);
+    }
+
+    void EnsureWildTopDownSorter(GameObject go)
+    {
+        if (go == null) return;
+        TopDownSorter sorter = go.GetComponent<TopDownSorter>();
+        if (sorter == null) sorter = go.AddComponent<TopDownSorter>();
+        sorter.sortMode = TopDownSorter.SortMode.RendererBottomY;
+        sorter.setSpriteSortPointToPivot = true;
+    }
+
+    void EnsureWildSortingLayer(GameObject go)
+    {
+        if (go == null) return;
+
+        int targetLayerId = 0;
+        bool foundPlayerLayer = false;
+        TryFindPlayer();
+        if (player != null)
+        {
+            SpriteRenderer playerSr = player.GetComponent<SpriteRenderer>();
+            if (playerSr != null)
+            {
+                targetLayerId = playerSr.sortingLayerID;
+                foundPlayerLayer = true;
+            }
+        }
+
+        if (!foundPlayerLayer)
+        {
+            int layer1 = SortingLayer.NameToID("Layer 1");
+            if (layer1 != 0) targetLayerId = layer1;
+        }
+
+        if (!foundPlayerLayer && targetLayerId == 0) return;
+
+        SpriteRenderer[] renderers = go.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null) continue;
+            renderers[i].sortingLayerID = targetLayerId;
+        }
+    }
+
+    void EnsureWildCollision(GameObject go, SpriteRenderer sr)
+    {
+        if (go == null) return;
+
+        Collider2D[] allCols = go.GetComponents<Collider2D>();
+        Collider2D solid = null;
+        for (int i = 0; i < allCols.Length; i++)
+        {
+            Collider2D c = allCols[i];
+            if (c == null) continue;
+            if (!c.isTrigger)
+            {
+                solid = c;
+                break;
+            }
+        }
+
+        if (solid == null)
+        {
+            CapsuleCollider2D cap = go.GetComponent<CapsuleCollider2D>();
+            if (cap == null) cap = go.AddComponent<CapsuleCollider2D>();
+            cap.isTrigger = false;
+            cap.direction = CapsuleDirection2D.Vertical;
+
+            if (sr != null && sr.sprite != null)
+            {
+                Bounds b = sr.sprite.bounds;
+                float footHeight = Mathf.Max(0.10f, b.size.y * 0.20f);
+                float footWidth = Mathf.Max(0.10f, b.size.x * 0.30f);
+                cap.size = new Vector2(footWidth, footHeight);
+                cap.offset = new Vector2(b.center.x, b.min.y + footHeight * 0.5f);
+            }
+            else
+            {
+                cap.size = new Vector2(0.18f, 0.12f);
+                cap.offset = new Vector2(0f, -0.10f);
+            }
+        }
+        else
+        {
+            solid.isTrigger = false;
+        }
+
+        Rigidbody2D rb = go.GetComponent<Rigidbody2D>();
+        if (rb == null) rb = go.AddComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+        rb.freezeRotation = true;
+        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
     }
 
 }
