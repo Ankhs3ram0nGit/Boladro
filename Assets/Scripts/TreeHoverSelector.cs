@@ -34,6 +34,10 @@ public class TreeHoverSelector : MonoBehaviour
     [Header("Manual Tuning")]
     public Vector2 selectorOffset = Vector2.zero;
     public Vector2 selectorScaleMultiplier = Vector2.one;
+    public Vector2 treeSelectorOffset = Vector2.zero;
+    public Vector2 stoneSelectorOffset = Vector2.zero;
+    public Vector2 treeSelectorScaleMultiplier = Vector2.one;
+    public Vector2 stoneSelectorScaleMultiplier = Vector2.one;
 
     [Header("Pickaxe Hit Squash")]
     public bool registerPickaxeHits = true;
@@ -492,16 +496,7 @@ public class TreeHoverSelector : MonoBehaviour
     {
         if (t == null) return;
 
-        Transform root = t;
-        if (t.parent != null)
-        {
-            FootColliderMarker marker = t.GetComponent<FootColliderMarker>();
-            if (marker == null)
-            {
-                root = t.root;
-            }
-        }
-
+        Transform root = ResolveHarvestRoot(t);
         if (root == null) return;
         int id = root.GetInstanceID();
         if (seenRootIds.Contains(id)) return;
@@ -529,6 +524,42 @@ public class TreeHoverSelector : MonoBehaviour
         }
     }
 
+    Transform ResolveHarvestRoot(Transform candidate)
+    {
+        if (candidate == null) return null;
+
+        Transform current = candidate;
+        while (current != null)
+        {
+            if (LooksLikeDirectHarvestTarget(current))
+            {
+                return current;
+            }
+            current = current.parent;
+        }
+
+        return null;
+    }
+
+    bool LooksLikeDirectHarvestTarget(Transform t)
+    {
+        if (t == null) return false;
+
+        FootColliderMarker marker = t.GetComponent<FootColliderMarker>();
+        if (IsRockMarker(marker) || IsTreeMarker(marker))
+        {
+            return true;
+        }
+
+        string n = t.name.ToLowerInvariant();
+        if (n.Contains("rock") || n.Contains("stone") || n.Contains("tree"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     bool TryResolveHarvestKind(Transform root, out HarvestKind kind)
     {
         kind = HarvestKind.Tree;
@@ -544,22 +575,6 @@ public class TreeHoverSelector : MonoBehaviour
         {
             kind = HarvestKind.Tree;
             return true;
-        }
-
-        FootColliderMarker[] childMarkers = root.GetComponentsInChildren<FootColliderMarker>(true);
-        for (int i = 0; i < childMarkers.Length; i++)
-        {
-            FootColliderMarker m = childMarkers[i];
-            if (IsRockMarker(m))
-            {
-                kind = HarvestKind.Stone;
-                return true;
-            }
-            if (IsTreeMarker(m))
-            {
-                kind = HarvestKind.Tree;
-                return true;
-            }
         }
 
         string n = root.name.ToLowerInvariant();
@@ -683,17 +698,21 @@ public class TreeHoverSelector : MonoBehaviour
         Sprite frame = selectorFrames[frameIndex];
         if (frame == null) return;
 
+        Vector2 kindOffset = target.kind == HarvestKind.Stone ? stoneSelectorOffset : treeSelectorOffset;
+        Vector2 kindScale = target.kind == HarvestKind.Stone ? stoneSelectorScaleMultiplier : treeSelectorScaleMultiplier;
+        Vector2 totalOffset = selectorOffset + kindOffset;
+
         selectorRenderer.sprite = frame;
         selectorTransform.position = new Vector3(
-            targetBounds.center.x + selectorOffset.x,
-            targetBounds.center.y + selectorOffset.y,
+            targetBounds.center.x + totalOffset.x,
+            targetBounds.center.y + totalOffset.y,
             0f);
 
         Vector2 frameSize = frame.bounds.size;
         float sx = frameSize.x > 0.0001f ? (targetBounds.size.x * selectorPadding) / frameSize.x : 1f;
         float sy = frameSize.y > 0.0001f ? (targetBounds.size.y * selectorPadding) / frameSize.y : 1f;
-        sx *= Mathf.Max(0.01f, selectorScaleMultiplier.x);
-        sy *= Mathf.Max(0.01f, selectorScaleMultiplier.y);
+        sx *= Mathf.Max(0.01f, selectorScaleMultiplier.x * kindScale.x);
+        sy *= Mathf.Max(0.01f, selectorScaleMultiplier.y * kindScale.y);
         selectorTransform.localScale = new Vector3(sx, sy, 1f);
 
         int highestOrder = 0;
@@ -868,7 +887,8 @@ public class TreeHoverSelector : MonoBehaviour
             Mathf.Max(0.02f, woodDropFallDurationMin),
             Mathf.Max(Mathf.Max(0.02f, woodDropFallDurationMin), woodDropFallDurationMax));
 
-        Vector3 dropScale = Vector3.one * Mathf.Max(0.01f, woodDropScale * 2f);
+        float typeScaleBoost = string.Equals(itemId, "stone", StringComparison.OrdinalIgnoreCase) ? 2f : 1f;
+        Vector3 dropScale = Vector3.one * Mathf.Max(0.01f, woodDropScale * 2f * typeScaleBoost);
         drop.transform.localScale = dropScale;
 
         resourceDrops.Add(new ResourceDropEntry
