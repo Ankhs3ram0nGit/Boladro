@@ -27,7 +27,6 @@ public class TreeHoverSelector : MonoBehaviour
     public float fallbackTileWorldSize = 1f;
     public float selectorPadding = 1.08f;
     public bool includeInactiveTrees;
-    [Range(0.2f, 1f)] public float treeInteractTopPortion = 0.62f;
 
     [Header("Rendering")]
     public int sortingOrderBoost = 300;
@@ -652,37 +651,16 @@ public class TreeHoverSelector : MonoBehaviour
         {
             if (TryGetCombinedBoundsFiltered(entry.renderers, IsTreeUpperRenderer, out bounds))
             {
-                bounds = ShrinkBoundsToTopPortion(bounds, treeInteractTopPortion);
                 return true;
             }
             if (TryGetCombinedBoundsFiltered(entry.renderers, sr => !IsTreeLowerRenderer(sr) && !IsShadowRenderer(sr), out bounds))
             {
-                bounds = ShrinkBoundsToTopPortion(bounds, treeInteractTopPortion);
-                return true;
-            }
-            if (TryGetCombinedBoundsFiltered(entry.renderers, sr => !IsShadowRenderer(sr), out bounds))
-            {
-                bounds = ShrinkBoundsToTopPortion(bounds, treeInteractTopPortion);
                 return true;
             }
             return false;
         }
 
         return TryGetCombinedBounds(entry.renderers, out bounds);
-    }
-
-    Bounds ShrinkBoundsToTopPortion(Bounds source, float topPortion)
-    {
-        float keep = Mathf.Clamp(topPortion, 0.2f, 1f);
-        if (keep >= 0.999f) return source;
-
-        float h = Mathf.Max(0.0001f, source.size.y * keep);
-        float minY = source.max.y - h;
-        float centerY = minY + (h * 0.5f);
-
-        return new Bounds(
-            new Vector3(source.center.x, centerY, source.center.z),
-            new Vector3(source.size.x, h, source.size.z));
     }
 
     bool TryGetCombinedBoundsFiltered(SpriteRenderer[] renderers, Func<SpriteRenderer, bool> includePredicate, out Bounds bounds)
@@ -835,8 +813,8 @@ public class TreeHoverSelector : MonoBehaviour
 
         if (entry.kind == HarvestKind.Tree)
         {
-            // Keep tree selector in its original visual position/size while hit area is top-only.
-            return TryGetCombinedBounds(entry.renderers, out bounds);
+            // Keep tree selector around the tree body (exclude shadow footprint).
+            return TryGetCombinedBounds(entry.renderers, false, out bounds);
         }
 
         return TryGetCombinedBounds(entry.renderers, out bounds);
