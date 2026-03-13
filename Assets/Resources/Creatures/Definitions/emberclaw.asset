@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: emberclaw
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: emberclaw
+  displayName: Emberclaw
+  description: Emberclaw
+  rarityTier: 2
+  primaryType: 8
+  secondaryType: 9
+  tertiaryType: 7
+  quaternaryType: 10
+  evolutionStage: 2
+  sprite: {fileID: -7102338558194238675, guid: d6faf30df1cff7b48955106aee410742, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 1.3
+  wildBehaviour: 1
+  moveSpeed: 2.8
+  wanderRadius: 4
+  fleeSpeedMultiplier: 1.8
+  detectionRadius: 4.5
+  aggroRadius: 2.8
+  baseHP: 58
+  baseAttack: 20
+  baseDefense: 15
+  baseSpeed: 20
+  hpPerLevel: 7
+  atkPerLevel: 3
+  defPerLevel: 2
+  spdPerLevel: 2
+  moveSlot1: {fileID: 11400000, guid: 47382d68d34504e4792bb59b2d577765, type: 2}
+  moveSlot2: {fileID: 11400000, guid: 4e06feef9ab52ae47ab04ac04cc701b1, type: 2}
+  moveSlot3: {fileID: 11400000, guid: 836db0c131a46cf4ba9e7d5960d4b7d4, type: 2}
+  moveSlot4: {fileID: 11400000, guid: 1a0cffe857251244da784fc03a79c3ed, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 4c89fff76056b5d4c81ec791169b9117,
+    type: 2}
+  nextEvolution: {fileID: 11400000, guid: a1e92d41396f1874a8194a4fe300c12b, type: 2}
+  evolutionTrigger: 1
+  evolutionLevel: 36
+  evolutionBattleCount: 40
+  evolutionItem: 0
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}

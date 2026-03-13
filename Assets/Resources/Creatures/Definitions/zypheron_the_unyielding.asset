@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: zypheron_the_unyielding
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: zypheron_the_unyielding
+  displayName: Zypheron the Unyielding
+  description: Zypheron the Unyielding
+  rarityTier: 4
+  primaryType: 3
+  secondaryType: 6
+  tertiaryType: 7
+  quaternaryType: 10
+  evolutionStage: 4
+  sprite: {fileID: 1084963024569549633, guid: d14033ece311e98479e12a7190578ab7, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 2
+  wildBehaviour: 0
+  moveSpeed: 4.5
+  wanderRadius: 6
+  fleeSpeedMultiplier: 1.7
+  detectionRadius: 7
+  aggroRadius: 6
+  baseHP: 124
+  baseAttack: 74
+  baseDefense: 37
+  baseSpeed: 82
+  hpPerLevel: 6
+  atkPerLevel: 4
+  defPerLevel: 2
+  spdPerLevel: 3
+  moveSlot1: {fileID: 11400000, guid: b88c681c858b1504b9d31fd914c07b43, type: 2}
+  moveSlot2: {fileID: 11400000, guid: aa026c5ec1c9c5a45ad53f9a4234064a, type: 2}
+  moveSlot3: {fileID: 11400000, guid: e66253c1a7fdb4b4d8a6974435087115, type: 2}
+  moveSlot4: {fileID: 11400000, guid: 0e1e8f76f4dd45047946c3434a17aa99, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 69f1bc565586a51419159099b9fecc3a,
+    type: 2}
+  nextEvolution: {fileID: 0}
+  evolutionTrigger: 0
+  evolutionLevel: 0
+  evolutionBattleCount: 0
+  evolutionItem: 0
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}

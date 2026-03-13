@@ -18,43 +18,43 @@ MonoBehaviour:
   respawnCooldownSeconds: 3
   mainPool:
   - creatureID: whelpling
-    weight: 60
+    weight: 40
     levelMin: 2
     levelMax: 5
     rarityTier: 0
     nightOnly: 0
     dayOnly: 0
     levelVarianceBonus: 0
-  - creatureID: meadow_hopper
-    weight: 40
-    levelMin: 1
-    levelMax: 1
+  - creatureID: ashcub
+    weight: 30
+    levelMin: 2
+    levelMax: 6
     rarityTier: 0
     nightOnly: 0
     dayOnly: 0
     levelVarianceBonus: 0
-  - creatureID: leaf_sprite
+  - creatureID: strikeling
     weight: 30
-    levelMin: 1
-    levelMax: 1
+    levelMin: 2
+    levelMax: 6
     rarityTier: 0
     nightOnly: 0
     dayOnly: 0
     levelVarianceBonus: 0
   rarePool:
-  - creatureID: ashcub
+  - creatureID: emberclaw
     weight: 50
-    levelMin: 5
-    levelMax: 8
-    rarityTier: 4
+    levelMin: 7
+    levelMax: 11
+    rarityTier: 2
     nightOnly: 0
     dayOnly: 0
     levelVarianceBonus: 0
-  - creatureID: strikeling
+  - creatureID: frostcharge
     weight: 50
-    levelMin: 5
-    levelMax: 8
-    rarityTier: 4
+    levelMin: 7
+    levelMax: 11
+    rarityTier: 2
     nightOnly: 0
     dayOnly: 0
     levelVarianceBonus: 0

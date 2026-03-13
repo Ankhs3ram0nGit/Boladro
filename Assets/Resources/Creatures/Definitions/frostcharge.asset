@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: frostcharge
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: frostcharge
+  displayName: Frostcharge
+  description: Frostcharge
+  rarityTier: 2
+  primaryType: 3
+  secondaryType: 6
+  tertiaryType: 7
+  quaternaryType: 10
+  evolutionStage: 2
+  sprite: {fileID: 5553231447948131785, guid: 10cc0a67c947a2a4eb35ea34242da380, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 1.3
+  wildBehaviour: 1
+  moveSpeed: 3.8
+  wanderRadius: 4.5
+  fleeSpeedMultiplier: 1.9
+  detectionRadius: 4.5
+  aggroRadius: 2.8
+  baseHP: 54
+  baseAttack: 26
+  baseDefense: 13
+  baseSpeed: 28
+  hpPerLevel: 6
+  atkPerLevel: 4
+  defPerLevel: 2
+  spdPerLevel: 3
+  moveSlot1: {fileID: 11400000, guid: ecb719a12ad38144ab6af8d0f1a0d6c2, type: 2}
+  moveSlot2: {fileID: 11400000, guid: 1a4a76fbb9ec84c4aa20a6c2b17e4e7c, type: 2}
+  moveSlot3: {fileID: 11400000, guid: 580b11fd82c06b642919dcbfdfb9e1df, type: 2}
+  moveSlot4: {fileID: 11400000, guid: d8c58e33af5eaf542b0d1f15eb256435, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 69f1bc565586a51419159099b9fecc3a,
+    type: 2}
+  nextEvolution: {fileID: 11400000, guid: f80c2f0e28a46064b9a737d63dd3721a, type: 2}
+  evolutionTrigger: 1
+  evolutionLevel: 36
+  evolutionBattleCount: 40
+  evolutionItem: 0
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}

@@ -15,6 +15,8 @@ public class CreatureGroundShadow : MonoBehaviour
     private Transform shadowTransform;
     private WildCreatureAI wildAI;
     private Follower followerAI;
+    private CreatureCombatant combatant;
+    private Sprite appliedShadowSprite;
     private float baseLocalScaleYAbs = 1f;
 
     private static Sprite sharedShadowSprite;
@@ -24,6 +26,7 @@ public class CreatureGroundShadow : MonoBehaviour
         sourceRenderer = GetComponent<SpriteRenderer>();
         wildAI = GetComponent<WildCreatureAI>();
         followerAI = GetComponent<Follower>();
+        combatant = GetComponent<CreatureCombatant>();
         verticalOffset = Mathf.Clamp(verticalOffset, -0.40f, -0.28f);
         if (sourceRenderer != null)
         {
@@ -47,6 +50,13 @@ public class CreatureGroundShadow : MonoBehaviour
 
         EnsureShadowObject();
         if (shadowRenderer == null || shadowTransform == null) return;
+
+        Sprite preferred = ResolvePreferredShadowSprite();
+        if (preferred != appliedShadowSprite)
+        {
+            shadowRenderer.sprite = preferred;
+            appliedShadowSprite = preferred;
+        }
 
         float air = GetAirFactor();
         float shrink = Mathf.Lerp(1f, Mathf.Clamp01(minAirScale), air);
@@ -102,9 +112,20 @@ public class CreatureGroundShadow : MonoBehaviour
         shadowObj.hideFlags = HideFlags.DontSave;
         shadowTransform = shadowObj.transform;
         shadowRenderer = shadowObj.AddComponent<SpriteRenderer>();
-        shadowRenderer.sprite = GetOrCreateShadowSprite();
+        shadowRenderer.sprite = ResolvePreferredShadowSprite();
+        appliedShadowSprite = shadowRenderer.sprite;
         shadowRenderer.drawMode = SpriteDrawMode.Simple;
         shadowRenderer.color = new Color(0f, 0f, 0f, Mathf.Clamp01(opacity));
+    }
+
+    private Sprite ResolvePreferredShadowSprite()
+    {
+        if (combatant == null) combatant = GetComponent<CreatureCombatant>();
+        if (combatant != null && combatant.Definition != null && combatant.Definition.shadowSprite != null)
+        {
+            return combatant.Definition.shadowSprite;
+        }
+        return GetOrCreateShadowSprite();
     }
 
     private float GetAirFactor()

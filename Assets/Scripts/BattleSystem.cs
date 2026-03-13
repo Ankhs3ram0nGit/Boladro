@@ -91,6 +91,7 @@ public class BattleSystem : MonoBehaviour
     private Vector2Int lastLayoutScreenSize;
     private bool turnResolutionInProgress;
     private readonly HashSet<Image> activeAttackAnimations = new HashSet<Image>();
+    private readonly Dictionary<CreatureCombatant, int> guaranteedDodgeCharges = new Dictionary<CreatureCombatant, int>();
     private Sprite shadowEllipseSprite;
     private Vector3 playerSpriteBaseLocalPos;
     private Vector3 enemySpriteBaseLocalPos;
@@ -788,6 +789,7 @@ public class BattleSystem : MonoBehaviour
                 float hpRatio = Mathf.Clamp01((float)enemyHealth.currentHealth / enemyHealth.maxHealth);
                 enemyCreature.currentHP = Mathf.Clamp(Mathf.RoundToInt(enemyCreature.maxHP * hpRatio), 1, enemyCreature.maxHP);
             }
+            enemyCreature.SyncInstanceRuntimeState();
         }
 
         if (battleRoot != null) battleRoot.SetActive(true);
@@ -924,6 +926,7 @@ public class BattleSystem : MonoBehaviour
         IsEngagedBattleActive = false;
         waitingForPlayerMove = false;
         turnResolutionInProgress = false;
+        guaranteedDodgeCharges.Clear();
 
         if (battleRoot != null) battleRoot.SetActive(false);
         if (movePanel != null) movePanel.SetActive(false);
@@ -1059,7 +1062,10 @@ public class BattleSystem : MonoBehaviour
         SetMessage("Opponent's turn.");
         yield return new WaitForSeconds(opponentTurnDelay);
 
-        yield return PerformAttack(enemyCreature, playerCreature, enemyAttack);
+        if (enemyAttack != null)
+        {
+            yield return PerformAttack(enemyCreature, playerCreature, enemyAttack);
+        }
         if (playerCreature.currentHP <= 0)
         {
             turnResolutionInProgress = false;
@@ -1083,8 +1089,14 @@ public class BattleSystem : MonoBehaviour
     {
         if (enemyCreature.attacks == null || enemyCreature.attacks.Count == 0)
         {
-            enemyCreature.InitWhelpling(Mathf.Max(1, enemyCreature.level));
+            string enemyId = ResolveCreatureID(
+                currentEnemyAI != null ? currentEnemyAI.gameObject : (enemyCreature != null ? enemyCreature.gameObject : null),
+                enemyCreature
+            );
+            ConfigureCombatantByCreatureID(enemyCreature, enemyId, Mathf.Max(1, enemyCreature.level), false);
         }
+
+        if (enemyCreature.attacks == null || enemyCreature.attacks.Count == 0) return null;
 
         for (int i = 0; i < enemyCreature.attacks.Count; i++)
         {
@@ -1108,6 +1120,8 @@ public class BattleSystem : MonoBehaviour
 
     IEnumerator PerformAttack(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk)
     {
+        if (attacker == null || defender == null || atk == null) yield break;
+
         Image attackerImage = GetSpriteImageForCombatant(attacker);
         Image defenderImage = GetSpriteImageForCombatant(defender);
 
@@ -1120,14 +1134,21 @@ public class BattleSystem : MonoBehaviour
 
         atk.currentPP = Mathf.Max(0, atk.currentPP - 1);
 
-        if (!RollAccuracy(atk.accuracy))
+        if (TryConsumeGuaranteedDodge(defender))
+        {
+            SetMessage(defender.creatureName + " dodged the attack!");
+            yield return new WaitForSeconds(0.45f);
+            yield break;
+        }
+
+        if (!RollAccuracy(atk.accuracy, attacker))
         {
             SetMessage(attacker.creatureName + " missed!");
             yield return new WaitForSeconds(0.5f);
             yield break;
         }
 
-        bool isCrit = RollCrit();
+        bool isCrit = RollCrit(attacker);
         int damage = CalculateDamage(attacker, defender, atk, isCrit);
 
         yield return StartCoroutine(AnimateAttack(attackerImage, defenderImage, atk.baseDamage > 0));
@@ -1137,23 +1158,48 @@ public class BattleSystem : MonoBehaviour
             defender.currentHP = Mathf.Max(0, defender.currentHP - damage);
         }
 
+        if (atk.specialFlag == MoveFlag.GuaranteeDodge)
+        {
+            AddGuaranteedDodge(attacker, 1);
+        }
+
         ApplyStatusFromAttack(defender, atk, isCrit);
 
+        attacker.SyncInstanceRuntimeState();
+        defender.SyncInstanceRuntimeState();
         UpdateUI();
 
         SetMessage(attacker.creatureName + " used " + atk.name + "!");
         yield return new WaitForSeconds(actionNarrationDelay);
     }
 
-    bool RollAccuracy(int accuracy)
+    bool RollAccuracy(int accuracy, CreatureCombatant attacker)
     {
+        int effective = Mathf.Clamp(accuracy, 1, 100);
+        if (attacker != null)
+        {
+            if (attacker.HasStatus(StatusEffectType.Blind))
+            {
+                effective = Mathf.Max(1, Mathf.RoundToInt(effective * 0.80f));
+            }
+
+            CreatureStats stats = attacker.GetFinalStats();
+            effective = Mathf.Clamp(Mathf.RoundToInt(effective * stats.accuracyModifier), 1, 100);
+        }
+
         int roll = Random.Range(1, 101);
-        return roll <= accuracy;
+        return roll <= effective;
     }
 
-    bool RollCrit()
+    bool RollCrit(CreatureCombatant attacker)
     {
-        return Random.value <= 0.10f;
+        float chance = 0.10f;
+        if (attacker != null)
+        {
+            CreatureStats stats = attacker.GetFinalStats();
+            chance *= Mathf.Clamp(stats.critModifier, 1f, 2f);
+        }
+        return Random.value <= chance;
     }
 
     int CalculateDamage(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk, bool isCrit)
@@ -1161,14 +1207,46 @@ public class BattleSystem : MonoBehaviour
         int dmg = isCrit ? atk.critDamage : atk.baseDamage;
         if (dmg <= 0) return 0;
 
-        float multiplier = TypeMultiplier(atk.type, defender.types.Length > 0 ? defender.types[0] : CreatureType.Normal);
+        CreatureStats attackerStats = attacker != null ? attacker.GetFinalStats() : default;
+        CreatureStats defenderStats = defender != null ? defender.GetFinalStats() : default;
+        float attackVsDefense = Mathf.Max(0.4f, attackerStats.attack / Mathf.Max(1f, defenderStats.defense));
+
+        CreatureType[] defenderTypes = defender != null ? defender.GetResolvedTypes() : null;
+        if (defenderTypes == null || defenderTypes.Length == 0)
+        {
+            defenderTypes = new[] { CreatureType.Normal };
+        }
+
+        float multiplier = 1f;
+        for (int i = 0; i < defenderTypes.Length; i++)
+        {
+            multiplier *= TypeMultiplier(atk.type, defenderTypes[i]);
+        }
 
         if (attacker.HasStatus(StatusEffectType.Burn) && atk.isPhysical)
         {
             multiplier *= 0.5f;
         }
 
-        int finalDmg = Mathf.FloorToInt(dmg * multiplier);
+        if (atk.specialFlag == MoveFlag.DoubleDamageIfStatused && defender != null && defender.statusEffects != null && defender.statusEffects.Count > 0)
+        {
+            multiplier *= 2f;
+        }
+
+        if (atk.specialFlag == MoveFlag.DragonBonus && attacker != null)
+        {
+            CreatureType[] attackerTypes = attacker.GetResolvedTypes();
+            for (int i = 0; i < attackerTypes.Length; i++)
+            {
+                if (attackerTypes[i] == CreatureType.Dragon)
+                {
+                    multiplier *= 1.25f;
+                    break;
+                }
+            }
+        }
+
+        int finalDmg = Mathf.FloorToInt(dmg * attackVsDefense * multiplier);
         if (finalDmg < 1) finalDmg = 1;
         return finalDmg;
     }
@@ -1224,29 +1302,24 @@ public class BattleSystem : MonoBehaviour
     void ApplyStatusFromAttack(CreatureCombatant defender, AttackData atk, bool isCrit)
     {
         if (atk.statusToApply == null) return;
-
-        if (atk.name == "Ancient Croak")
-        {
-            int turns = isCrit ? Random.Range(2, 4) : 1;
-            defender.AddOrRefreshStatus(StatusEffectType.Anxious, turns);
-            return;
-        }
+        if (defender == null) return;
+        if (atk.statusToApply.Value == StatusEffectType.None) return;
 
         if (Random.value <= atk.statusChance)
         {
-            if (atk.statusToApply.Value == StatusEffectType.Burn)
+            int turns = atk.statusDuration;
+            if (turns == 0)
             {
-                defender.AddOrRefreshStatus(StatusEffectType.Burn, 3);
+                turns = isCrit ? 3 : 2;
             }
-            else if (atk.statusToApply.Value == StatusEffectType.Wet)
-            {
-                defender.AddOrRefreshStatus(StatusEffectType.Wet, 3);
-            }
+            defender.AddOrRefreshStatus(atk.statusToApply.Value, turns);
         }
     }
 
     bool IsSkippedByStatus(CreatureCombatant combatant)
     {
+        if (combatant == null) return false;
+
         if (combatant.HasStatus(StatusEffectType.Frozen))
         {
             combatant.TickStatus(StatusEffectType.Frozen);
@@ -1265,9 +1338,22 @@ public class BattleSystem : MonoBehaviour
             }
         }
 
+        if (combatant.HasStatus(StatusEffectType.Terrified))
+        {
+            if (Random.value <= 0.35f)
+            {
+                combatant.TickStatus(StatusEffectType.Terrified);
+                return true;
+            }
+        }
+
         if (combatant.HasStatus(StatusEffectType.Paralysed))
         {
-            if (Random.value <= 0.20f) return true;
+            if (Random.value <= 0.20f)
+            {
+                combatant.TickStatus(StatusEffectType.Paralysed);
+                return true;
+            }
         }
 
         return false;
@@ -1275,6 +1361,8 @@ public class BattleSystem : MonoBehaviour
 
     void ApplyEndOfTurnStatuses(CreatureCombatant combatant)
     {
+        if (combatant == null) return;
+
         if (combatant.HasStatus(StatusEffectType.Burn))
         {
             combatant.currentHP = Mathf.Max(0, combatant.currentHP - 2);
@@ -1295,6 +1383,54 @@ public class BattleSystem : MonoBehaviour
         {
             combatant.TickStatus(StatusEffectType.Poisoned);
         }
+
+        if (combatant.HasStatus(StatusEffectType.Blind))
+        {
+            combatant.TickStatus(StatusEffectType.Blind);
+        }
+
+        if (combatant.HasStatus(StatusEffectType.Terrified))
+        {
+            combatant.TickStatus(StatusEffectType.Terrified);
+        }
+
+        combatant.SyncInstanceRuntimeState();
+    }
+
+    void AddGuaranteedDodge(CreatureCombatant combatant, int charges)
+    {
+        if (combatant == null || charges <= 0) return;
+        if (guaranteedDodgeCharges.TryGetValue(combatant, out int current))
+        {
+            guaranteedDodgeCharges[combatant] = current + charges;
+        }
+        else
+        {
+            guaranteedDodgeCharges[combatant] = charges;
+        }
+    }
+
+    bool TryConsumeGuaranteedDodge(CreatureCombatant combatant)
+    {
+        if (combatant == null) return false;
+        if (!guaranteedDodgeCharges.TryGetValue(combatant, out int current)) return false;
+        if (current <= 0)
+        {
+            guaranteedDodgeCharges.Remove(combatant);
+            return false;
+        }
+
+        current -= 1;
+        if (current <= 0)
+        {
+            guaranteedDodgeCharges.Remove(combatant);
+        }
+        else
+        {
+            guaranteedDodgeCharges[combatant] = current;
+        }
+
+        return true;
     }
 
     void HandlePlayerDefeat()
@@ -1327,7 +1463,7 @@ public class BattleSystem : MonoBehaviour
         {
             if (playerNameText != null) playerNameText.text = playerCreature.creatureName;
             if (playerLevelText != null) playerLevelText.text = "Lv " + playerCreature.level;
-            if (playerTypesText != null) playerTypesText.text = TypesToString(playerCreature.types);
+            if (playerTypesText != null) playerTypesText.text = TypesToString(playerCreature.GetResolvedTypes());
             if (playerHpText != null) playerHpText.text = playerCreature.currentHP + " / " + playerCreature.maxHP;
             float playerHpRatio = playerCreature.maxHP > 0 ? (float)playerCreature.currentHP / playerCreature.maxHP : 0f;
             ApplyHpFillVisual(playerHpFill, playerHpRatio);
@@ -1345,7 +1481,7 @@ public class BattleSystem : MonoBehaviour
         {
             if (enemyNameText != null) enemyNameText.text = enemyCreature.creatureName;
             if (enemyLevelText != null) enemyLevelText.text = "Lv " + enemyCreature.level;
-            if (enemyTypesText != null) enemyTypesText.text = TypesToString(enemyCreature.types);
+            if (enemyTypesText != null) enemyTypesText.text = TypesToString(enemyCreature.GetResolvedTypes());
             if (enemyHpText != null) enemyHpText.text = enemyCreature.currentHP + " / " + enemyCreature.maxHP;
             float enemyHpRatio = enemyCreature.maxHP > 0 ? (float)enemyCreature.currentHP / enemyCreature.maxHP : 0f;
             ApplyHpFillVisual(enemyHpFill, enemyHpRatio);
@@ -1389,7 +1525,14 @@ public class BattleSystem : MonoBehaviour
     string TypesToString(CreatureType[] types)
     {
         if (types == null || types.Length == 0) return "None";
-        return string.Join(" / ", types);
+        List<string> labels = new List<string>(types.Length);
+        for (int i = 0; i < types.Length; i++)
+        {
+            if (types[i] == CreatureType.None) continue;
+            labels.Add(types[i].ToString());
+        }
+        if (labels.Count == 0) return "None";
+        return string.Join(" / ", labels);
     }
 
     void SetActionMenuVisible(bool visible)
@@ -2165,6 +2308,11 @@ public class BattleSystem : MonoBehaviour
     {
         if (combatant == null) return null;
 
+        if (combatant.Definition != null && combatant.Definition.sprite != null)
+        {
+            return combatant.Definition.sprite;
+        }
+
         SpriteRenderer sr = combatant.GetComponent<SpriteRenderer>();
         if (sr == null)
         {
@@ -2188,36 +2336,22 @@ public class BattleSystem : MonoBehaviour
 
     float ResolveBattleSpriteScale(CreatureCombatant combatant, Sprite sprite)
     {
-        float idScale = 1f;
-        string creatureId = ResolveCreatureID(combatant != null ? combatant.gameObject : null, combatant);
-        string key = CanonicalizeCreatureID(creatureId);
+        if (sprite == null) return 1f;
 
-        if (key.Contains("whelpling") || key.Contains("ashcub") || key.Contains("strikeling"))
+        CreatureDefinition def = combatant != null ? combatant.Definition : null;
+        float stageFactor = 1f;
+        float definitionScale = 1f;
+        if (def != null)
         {
-            idScale = 0.9f;
-        }
-        else if (key.Contains("emberclaw") || key.Contains("frostcharge"))
-        {
-            idScale = 1.0f;
-        }
-        else if (key.Contains("voidmane") || key.Contains("galecrown"))
-        {
-            idScale = 1.15f;
-        }
-        else if (key.Contains("solnox") || key.Contains("zypheron"))
-        {
-            idScale = 1.3f;
+            stageFactor = 1f + (Mathf.Clamp(def.evolutionStage, 1, 4) - 1) * 0.12f;
+            definitionScale = Mathf.Max(0.05f, def.battleSizeMultiplier);
         }
 
-        float spriteScale = 1f;
-        if (sprite != null)
-        {
-            float area = Mathf.Max(1f, sprite.rect.width * sprite.rect.height);
-            float normalized = Mathf.Sqrt(area / (512f * 512f));
-            spriteScale = Mathf.Clamp(normalized, 0.78f, 1.35f);
-        }
+        float ppu = Mathf.Max(1f, sprite.pixelsPerUnit);
+        float nativeHeight = sprite.rect.height / ppu;
+        float nativeFactor = Mathf.Clamp(nativeHeight / 2.2f, 0.72f, 1.70f);
 
-        return Mathf.Clamp(idScale * spriteScale, 0.72f, 1.45f);
+        return Mathf.Clamp(nativeFactor * stageFactor * definitionScale, 0.68f, 2.05f);
     }
 
     void EnsureMessagePresentation()
@@ -2460,30 +2594,50 @@ public class BattleSystem : MonoBehaviour
         if (combatant == null) return;
 
         int lvl = Mathf.Max(1, level);
-        string id = NormalizeCreatureID(creatureID);
+        string id = CanonicalizeCreatureID(creatureID);
         if (string.IsNullOrWhiteSpace(id)) id = "whelpling";
+
+        if (CreatureRegistry.TryGet(id, out CreatureDefinition def))
+        {
+            CreatureInstance inst = combatant.Instance;
+            bool needsNewInstance = inst == null;
+            if (!needsNewInstance)
+            {
+                string instId = CanonicalizeCreatureID(inst.definitionID);
+                needsNewInstance = string.IsNullOrWhiteSpace(instId) || instId != CanonicalizeCreatureID(def.creatureID);
+            }
+
+            if (needsNewInstance)
+            {
+                inst = CreatureInstanceFactory.CreateWild(def, lvl);
+            }
+            else
+            {
+                inst.level = lvl;
+            }
+
+            if (inst != null)
+            {
+                if (resetHpToFull || inst.currentHP <= 0)
+                {
+                    int maxHp = CreatureInstanceFactory.ComputeMaxHP(def, inst.soulTraits, inst.level);
+                    inst.currentHP = Mathf.Max(1, maxHp);
+                    CreatureInstanceFactory.RefillPP(def, inst);
+                }
+            }
+
+            combatant.InitFromDefinition(def, inst);
+            if (resetHpToFull)
+            {
+                combatant.currentHP = combatant.maxHP;
+                combatant.SyncInstanceRuntimeState();
+            }
+            return;
+        }
 
         combatant.autoInitWhelpling = false;
         combatant.InitWhelpling(lvl);
-
-        if (id == "ashcub" || id == "emberclaw" || id == "voidmane" || id == "solnoxeternal" || id == "solnoxtheeternal")
-        {
-            combatant.creatureName = ToDisplayName(creatureID, "Ashcub");
-            combatant.types = new[] { CreatureType.Light, CreatureType.Dark, CreatureType.Dragon };
-        }
-        else if (id == "strikeling" || id == "frostcharge" || id == "galecrown" || id == "zypheronunyielding" || id == "zypherontheunyielding")
-        {
-            combatant.creatureName = ToDisplayName(creatureID, "Strikeling");
-            combatant.types = new[] { CreatureType.Lightning, CreatureType.Ice, CreatureType.Dragon };
-        }
-        else
-        {
-            combatant.creatureName = ToDisplayName(creatureID, "Whelpling");
-            combatant.types = new[] { CreatureType.Dragon, CreatureType.Water, CreatureType.Fire };
-        }
-
-        combatant.level = lvl;
-        if (combatant.maxHP < 1) combatant.maxHP = 1;
+        combatant.creatureName = ToDisplayName(creatureID, "Whelpling");
         if (resetHpToFull || combatant.currentHP <= 0 || combatant.currentHP > combatant.maxHP)
         {
             combatant.currentHP = combatant.maxHP;
@@ -2492,6 +2646,11 @@ public class BattleSystem : MonoBehaviour
 
     string ResolveCreatureID(GameObject go, CreatureCombatant fallbackCombatant)
     {
+        if (fallbackCombatant != null && fallbackCombatant.Definition != null)
+        {
+            return CanonicalizeCreatureID(fallbackCombatant.Definition.creatureID);
+        }
+
         if (go != null)
         {
             WorldSpawnMarker marker = go.GetComponent<WorldSpawnMarker>();
@@ -2535,29 +2694,17 @@ public class BattleSystem : MonoBehaviour
 
     string NormalizeCreatureID(string id)
     {
-        if (string.IsNullOrWhiteSpace(id)) return string.Empty;
-        return id.Trim().Replace(" ", "").Replace("_", "").ToLowerInvariant();
+        return CreatureRegistry.NormalizeKey(id, keepUnderscore: false);
     }
 
     string CanonicalizeCreatureID(string id)
     {
-        string key = NormalizeCreatureID(id);
-        if (string.IsNullOrWhiteSpace(key)) return "whelpling";
-
-        if (key.Contains("ashcub") || key.Contains("emberclaw") || key.Contains("voidmane") || key.Contains("solnox"))
-        {
-            return key;
-        }
-        if (key.Contains("strikeling") || key.Contains("frostcharge") || key.Contains("galecrown") || key.Contains("zypheron"))
-        {
-            return key;
-        }
-        if (key.Contains("frog") || key.Contains("whelpling"))
+        string canonical = CreatureRegistry.CanonicalizeCreatureID(id);
+        if (string.IsNullOrWhiteSpace(canonical))
         {
             return "whelpling";
         }
-
-        return key;
+        return canonical;
     }
 
     string TryInferCreatureIDFromVisual(GameObject go)
@@ -2601,6 +2748,7 @@ public class BattleSystem : MonoBehaviour
     {
         string key = CanonicalizeCreatureID(creatureID);
         if (string.IsNullOrEmpty(key)) key = "whelpling";
+        string normalizedKey = NormalizeCreatureID(key);
         if (creatureSpriteCache.TryGetValue(key, out Sprite cached))
         {
             return cached;
@@ -2624,12 +2772,12 @@ public class BattleSystem : MonoBehaviour
             Sprite s = allSprites[i];
             if (s == null) continue;
             string spriteKey = NormalizeCreatureID(s.name);
-            if (spriteKey == key)
+            if (spriteKey == normalizedKey)
             {
                 creatureSpriteCache[key] = s;
                 return s;
             }
-            if (s.texture != null && NormalizeCreatureID(s.texture.name) == key)
+            if (s.texture != null && NormalizeCreatureID(s.texture.name) == normalizedKey)
             {
                 creatureSpriteCache[key] = s;
                 return s;
@@ -2647,7 +2795,7 @@ public class BattleSystem : MonoBehaviour
                 string path = AssetDatabase.GUIDToAssetPath(spriteGuids[i]);
                 if (string.IsNullOrWhiteSpace(path)) continue;
                 string fileName = System.IO.Path.GetFileNameWithoutExtension(path);
-                if (NormalizeCreatureID(fileName) != key) continue;
+                if (NormalizeCreatureID(fileName) != normalizedKey) continue;
 
                 Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
                 if (sprite != null)
@@ -2663,7 +2811,7 @@ public class BattleSystem : MonoBehaviour
                 string path = AssetDatabase.GUIDToAssetPath(textureGuids[i]);
                 if (string.IsNullOrWhiteSpace(path)) continue;
                 string fileName = System.IO.Path.GetFileNameWithoutExtension(path);
-                if (NormalizeCreatureID(fileName) != key) continue;
+                if (NormalizeCreatureID(fileName) != normalizedKey) continue;
 
                 Texture2D tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
                 if (tex != null)

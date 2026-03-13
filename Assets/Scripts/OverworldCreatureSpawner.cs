@@ -64,8 +64,8 @@ public class OverworldCreatureSpawner : MonoBehaviour
     [Min(5f)]
     public float farDespawnDistance = 40f;
 
-    [Tooltip("Enforce stage-weighted spawn odds so all evolution stages can appear.")]
-    public bool enforceProgressiveStageOdds = true;
+    [Tooltip("Deprecated: when false, AreaSpawnConfig remains the authoritative spawn source.")]
+    public bool enforceProgressiveStageOdds = false;
 
     private readonly List<WildCreatureAI> activeWilds = new List<WildCreatureAI>();
     private readonly Dictionary<string, Sprite> spriteCache = new Dictionary<string, Sprite>();
@@ -105,10 +105,6 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
         AreaSpawnConfig config = zone.GetEffectiveConfig();
         if (config == null) return;
-        if (enforceProgressiveStageOdds)
-        {
-            EnsureProgressiveSpawnOdds(config);
-        }
 
         if (!CanSpawnAtCurrentTime(config)) return;
         if (Time.time < nextSpawnAllowedTime) return;
@@ -369,35 +365,48 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
         WorldSpawnMarker marker = newObj.GetComponent<WorldSpawnMarker>();
         if (marker == null) marker = newObj.AddComponent<WorldSpawnMarker>();
-        marker.creatureID = data.creatureID;
+        string canonicalID = CreatureRegistry.CanonicalizeCreatureID(data.creatureID);
+        marker.creatureID = string.IsNullOrWhiteSpace(canonicalID) ? data.creatureID : canonicalID;
         marker.zoneID = zoneID;
         marker.level = Mathf.Max(1, data.resolvedLevel);
 
         WildCreatureAI ai = newObj.GetComponent<WildCreatureAI>();
         if (ai == null) ai = newObj.AddComponent<WildCreatureAI>();
-        ai.aggressionMode = CreatureAggressionMode.Neutral;
         ai.ExitBattle();
 
         CreatureCombatant combatant = newObj.GetComponent<CreatureCombatant>();
         if (combatant == null) combatant = newObj.AddComponent<CreatureCombatant>();
-        combatant.autoInitWhelpling = false;
-        combatant.InitWhelpling(Mathf.Max(1, data.resolvedLevel));
-        combatant.creatureName = FormatCreatureName(data.creatureID);
-        combatant.level = Mathf.Max(1, data.resolvedLevel);
+
+        int level = Mathf.Max(1, data.resolvedLevel);
+        if (!CreatureRegistry.TryGet(data.creatureID, out CreatureDefinition def) || def == null)
+        {
+            Debug.LogWarning("[Spawner] No CreatureDefinition found for ID '" + data.creatureID + "'. Spawn skipped.");
+            Destroy(newObj);
+            return false;
+        }
+
+        CreatureInstance instance = CreatureInstanceFactory.CreateWild(def, level);
+        if (instance != null)
+        {
+            instance.capturedInZoneID = zoneID;
+        }
+        combatant.InitFromDefinition(def, instance);
+        ai.ApplyDefinitionSettings(def);
 
         CreatureHealth health = newObj.GetComponent<CreatureHealth>();
         if (health == null) health = newObj.AddComponent<CreatureHealth>();
         health.level = combatant.level;
-        health.maxHealth = Mathf.Max(3, 2 + combatant.level);
-        health.currentHealth = health.maxHealth;
+        health.maxHealth = Mathf.Max(1, combatant.maxHP);
+        health.currentHealth = Mathf.Clamp(combatant.currentHP, 0, health.maxHealth);
 
         SpriteRenderer sr = newObj.GetComponent<SpriteRenderer>();
-        Sprite sprite = TryLoadSpriteForCreature(data.creatureID);
+        Sprite sprite = def.sprite != null ? def.sprite : TryLoadSpriteForCreature(data.creatureID);
         if (sprite != null && sr != null)
         {
             DisableSpriteOverrideComponents(newObj);
             sr.sprite = sprite;
             sr.drawMode = SpriteDrawMode.Simple;
+            ApplyOverworldDefinitionScale(newObj.transform, def, sprite);
         }
 
         WhelplingBounceAnimator bounce = newObj.GetComponent<WhelplingBounceAnimator>();
@@ -708,8 +717,7 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
     static string NormalizeKey(string value)
     {
-        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-        return value.Trim().Replace(" ", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+        return CreatureRegistry.NormalizeKey(value, keepUnderscore: false);
     }
 
     static string[] BuildNameCandidates(string id)
@@ -731,6 +739,16 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
         SpriteFromAtlas sfa = go.GetComponent<SpriteFromAtlas>();
         if (sfa != null) sfa.enabled = false;
+    }
+
+    void ApplyOverworldDefinitionScale(Transform target, CreatureDefinition def, Sprite sprite)
+    {
+        if (target == null || def == null || sprite == null) return;
+
+        // Sprite world size already derives from import PPU when localScale = 1.
+        // Keep scale tied to definition multiplier only, so PPU drives the baseline.
+        float scale = Mathf.Max(0.05f, def.overworldSizeMultiplier);
+        target.localScale = new Vector3(scale, scale, 1f);
     }
 
 }

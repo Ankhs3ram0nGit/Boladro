@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: whelpling
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: whelpling
+  displayName: Whelpling
+  description: Whelpling
+  rarityTier: 0
+  primaryType: 7
+  secondaryType: 2
+  tertiaryType: 1
+  quaternaryType: 10
+  evolutionStage: 1
+  sprite: {fileID: -7775585649045891666, guid: 50f01523c68d2ea4fae1fdd65f376d3d, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 1
+  wildBehaviour: 1
+  moveSpeed: 2
+  wanderRadius: 3
+  fleeSpeedMultiplier: 1.5
+  detectionRadius: 3.5
+  aggroRadius: 2.5
+  baseHP: 30
+  baseAttack: 6
+  baseDefense: 8
+  baseSpeed: 5
+  hpPerLevel: 7
+  atkPerLevel: 2.5
+  defPerLevel: 3
+  spdPerLevel: 1.5
+  moveSlot1: {fileID: 11400000, guid: 755f51b9f227ed04789efaa98ead37b8, type: 2}
+  moveSlot2: {fileID: 11400000, guid: f93e1c62a34e4ea4e8634456ee770088, type: 2}
+  moveSlot3: {fileID: 11400000, guid: c59633e1415edde46a2ecedafacba2ae, type: 2}
+  moveSlot4: {fileID: 11400000, guid: f42823a304ba07545997d9d842645824, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 62c4b5c3f20b30d4cb34b12e4eeb4e91,
+    type: 2}
+  nextEvolution: {fileID: 11400000, guid: 96093b0d2aa75c74190f03dc2a702cc7, type: 2}
+  evolutionTrigger: 0
+  evolutionLevel: 20
+  evolutionBattleCount: 0
+  evolutionItem: 0
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}

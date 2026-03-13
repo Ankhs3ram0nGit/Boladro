@@ -15,6 +15,9 @@ public class WildCreatureAI : MonoBehaviour
 
     public float roamRadius = 5f;
     public float detectionRadius = 5f;
+    public float aggroRadius = 2.5f;
+    public float fleeSpeedMultiplier = 1.5f;
+    public float baseMoveSpeed = 2.5f;
     public float chaseSpeed = 2.5f;
     public float wanderSpeed = 1.5f;
     [Tooltip("1.0 = current speed, 0.33 = one third speed.")]
@@ -79,6 +82,26 @@ public class WildCreatureAI : MonoBehaviour
         {
             // Wild movement controls facing. Prevent target-facing script override.
             faceTarget.enabled = false;
+        }
+    }
+
+    public void ApplyDefinitionSettings(CreatureDefinition def)
+    {
+        if (def == null) return;
+
+        aggressionMode = CreatureDefinition.ToAggressionMode(def.wildBehaviour);
+        roamRadius = Mathf.Max(0.1f, def.wanderRadius);
+        detectionRadius = Mathf.Max(0.1f, def.detectionRadius);
+        aggroRadius = Mathf.Clamp(def.aggroRadius, 0.1f, detectionRadius);
+        fleeSpeedMultiplier = Mathf.Max(1f, def.fleeSpeedMultiplier);
+        baseMoveSpeed = Mathf.Max(0.1f, def.moveSpeed);
+
+        // Existing hop timings are scaled by movementSpeedMultiplier (higher = faster).
+        movementSpeedMultiplier = Mathf.Clamp(baseMoveSpeed / 7.5f, 0.20f, 1.20f);
+
+        if (Mathf.Abs(def.facingDirection.x) > 0.001f)
+        {
+            spriteFacesRight = def.facingDirection.x >= 0f;
         }
     }
 
@@ -182,8 +205,8 @@ public class WildCreatureAI : MonoBehaviour
         Vector2 delta = (Vector2)transform.position - (Vector2)player.position;
         FaceMove(delta);
 
-        float desired = Mathf.Max(0.15f, detectionRadius - dist + 0.1f);
-        float step = Mathf.Min(desired, GetRandomHopDistanceWorld());
+        float desired = Mathf.Max(0.15f, detectionRadius - dist + 0.1f) * Mathf.Max(1f, fleeSpeedMultiplier);
+        float step = Mathf.Min(desired, GetRandomHopDistanceWorld() * Mathf.Max(1f, fleeSpeedMultiplier));
         if (step >= 0.05f)
         {
             StartCoroutine(HopTowards(SnapDirection(delta), step, false));
@@ -375,13 +398,12 @@ public class WildCreatureAI : MonoBehaviour
 
     bool ShouldChasePlayer(float dist)
     {
-        if (dist > detectionRadius) return false;
-
         switch (aggressionMode)
         {
             case CreatureAggressionMode.Aggressive:
-                return true;
+                return dist <= Mathf.Max(0.1f, aggroRadius);
             case CreatureAggressionMode.Neutral:
+                if (dist > detectionRadius) return false;
                 return provokedByPlayer;
             case CreatureAggressionMode.Passive:
                 return false;

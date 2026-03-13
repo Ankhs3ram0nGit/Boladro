@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: voidmane
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: voidmane
+  displayName: Voidmane
+  description: Voidmane
+  rarityTier: 3
+  primaryType: 8
+  secondaryType: 9
+  tertiaryType: 7
+  quaternaryType: 10
+  evolutionStage: 3
+  sprite: {fileID: -6692584179058797907, guid: 7e3da8a3579ff154f887d462001f4d41, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 1.6
+  wildBehaviour: 0
+  moveSpeed: 3
+  wanderRadius: 4.5
+  fleeSpeedMultiplier: 1.6
+  detectionRadius: 5
+  aggroRadius: 4.2
+  baseHP: 94
+  baseAttack: 38
+  baseDefense: 27
+  baseSpeed: 38
+  hpPerLevel: 7
+  atkPerLevel: 3
+  defPerLevel: 2
+  spdPerLevel: 2
+  moveSlot1: {fileID: 11400000, guid: 86803fc8cdb6ce441a703a46630235af, type: 2}
+  moveSlot2: {fileID: 11400000, guid: 491e95943f90d5b4dbbd8ddf98bc83c4, type: 2}
+  moveSlot3: {fileID: 11400000, guid: 9a6d3b71102759348a40d5b292ec73af, type: 2}
+  moveSlot4: {fileID: 11400000, guid: 0c85a1e3a2a2dba4b80858b2a8740ba5, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 4c89fff76056b5d4c81ec791169b9117,
+    type: 2}
+  nextEvolution: {fileID: 11400000, guid: 26eeb2d29d3057947878809e0f7d7250, type: 2}
+  evolutionTrigger: 2
+  evolutionLevel: 0
+  evolutionBattleCount: 0
+  evolutionItem: 8
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}

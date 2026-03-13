@@ -367,25 +367,25 @@ public class SpawnManager : MonoBehaviour
             new CreatureSpawnEntry
             {
                 creatureID = "whelpling",
-                weight = 60,
+                weight = 40,
                 levelMin = 2,
                 levelMax = 5,
                 rarityTier = CreatureRarity.Common
             },
             new CreatureSpawnEntry
             {
-                creatureID = "meadow_hopper",
-                weight = 40,
-                levelMin = 1,
-                levelMax = 1,
+                creatureID = "ashcub",
+                weight = 30,
+                levelMin = 2,
+                levelMax = 6,
                 rarityTier = CreatureRarity.Common
             },
             new CreatureSpawnEntry
             {
-                creatureID = "leaf_sprite",
+                creatureID = "strikeling",
                 weight = 30,
-                levelMin = 1,
-                levelMax = 1,
+                levelMin = 2,
+                levelMax = 6,
                 rarityTier = CreatureRarity.Common
             }
         };
@@ -393,19 +393,19 @@ public class SpawnManager : MonoBehaviour
         {
             new CreatureSpawnEntry
             {
-                creatureID = "ashcub",
+                creatureID = "emberclaw",
                 weight = 50,
-                levelMin = 5,
-                levelMax = 8,
-                rarityTier = CreatureRarity.Legendary
+                levelMin = 7,
+                levelMax = 11,
+                rarityTier = CreatureRarity.Rare
             },
             new CreatureSpawnEntry
             {
-                creatureID = "strikeling",
+                creatureID = "frostcharge",
                 weight = 50,
-                levelMin = 5,
-                levelMax = 8,
-                rarityTier = CreatureRarity.Legendary
+                levelMin = 7,
+                levelMax = 11,
+                rarityTier = CreatureRarity.Rare
             }
         };
         return cfg;

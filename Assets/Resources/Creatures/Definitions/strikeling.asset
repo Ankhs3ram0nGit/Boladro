@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: strikeling
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: strikeling
+  displayName: Strikeling
+  description: Strikeling
+  rarityTier: 0
+  primaryType: 3
+  secondaryType: 6
+  tertiaryType: 7
+  quaternaryType: 10
+  evolutionStage: 1
+  sprite: {fileID: -4182084795637744447, guid: 171dd7a00e98f3843a81a9221cc0684e, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 1
+  wildBehaviour: 1
+  moveSpeed: 3.5
+  wanderRadius: 4
+  fleeSpeedMultiplier: 2
+  detectionRadius: 3.5
+  aggroRadius: 2.4
+  baseHP: 28
+  baseAttack: 10
+  baseDefense: 5
+  baseSpeed: 10
+  hpPerLevel: 6
+  atkPerLevel: 4
+  defPerLevel: 2
+  spdPerLevel: 3
+  moveSlot1: {fileID: 11400000, guid: 39205d2afb3d1cf4a9be21b359745a39, type: 2}
+  moveSlot2: {fileID: 11400000, guid: e87ba4d047693a442bc93fe7b737606b, type: 2}
+  moveSlot3: {fileID: 11400000, guid: 0db63a9cd68a0724ab1a4f96675a52e5, type: 2}
+  moveSlot4: {fileID: 11400000, guid: 2ad3797a92aacf149b3186d97b8736c0, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 69f1bc565586a51419159099b9fecc3a,
+    type: 2}
+  nextEvolution: {fileID: 11400000, guid: 42f8b5fc5e08d8c45b1e8513cf477ce7, type: 2}
+  evolutionTrigger: 0
+  evolutionLevel: 18
+  evolutionBattleCount: 0
+  evolutionItem: 0
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}

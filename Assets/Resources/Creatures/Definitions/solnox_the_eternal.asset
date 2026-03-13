@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: solnox_the_eternal
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: solnox_the_eternal
+  displayName: Solnox the Eternal
+  description: Solnox the Eternal
+  rarityTier: 4
+  primaryType: 8
+  secondaryType: 9
+  tertiaryType: 7
+  quaternaryType: 10
+  evolutionStage: 4
+  sprite: {fileID: 1418623049493410471, guid: 040fa6538e4da4d418e82d4001bab233, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 2
+  wildBehaviour: 0
+  moveSpeed: 3.2
+  wanderRadius: 5
+  fleeSpeedMultiplier: 1.5
+  detectionRadius: 6
+  aggroRadius: 5
+  baseHP: 130
+  baseAttack: 56
+  baseDefense: 39
+  baseSpeed: 56
+  hpPerLevel: 7
+  atkPerLevel: 3
+  defPerLevel: 2
+  spdPerLevel: 2
+  moveSlot1: {fileID: 11400000, guid: 96aade3457d616a488ee4a0e1c72e313, type: 2}
+  moveSlot2: {fileID: 11400000, guid: bf22f94614a7e6f469cb70f2cc0e6863, type: 2}
+  moveSlot3: {fileID: 11400000, guid: 9a6d3b71102759348a40d5b292ec73af, type: 2}
+  moveSlot4: {fileID: 11400000, guid: a277676175e20e0408bb41ccb8823119, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 4c89fff76056b5d4c81ec791169b9117,
+    type: 2}
+  nextEvolution: {fileID: 0}
+  evolutionTrigger: 0
+  evolutionLevel: 0
+  evolutionBattleCount: 0
+  evolutionItem: 0
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}

@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2bb9713d3c29a3468ef7ede7425dad6, type: 3}
+  m_Name: galecrown
+  m_EditorClassIdentifier: Assembly-CSharp::CreatureDefinition
+  creatureID: galecrown
+  displayName: Galecrown
+  description: Galecrown
+  rarityTier: 3
+  primaryType: 3
+  secondaryType: 6
+  tertiaryType: 7
+  quaternaryType: 10
+  evolutionStage: 3
+  sprite: {fileID: 771118630999056744, guid: f0c65255d0e42254eb422911610be9b4, type: 3}
+  shadowSprite: {fileID: 0}
+  facingDirection: {x: 1, y: 0}
+  idleAnimationClip: {fileID: 0}
+  overworldSizeMultiplier: 1
+  battleSizeMultiplier: 1.7
+  wildBehaviour: 0
+  moveSpeed: 4
+  wanderRadius: 5
+  fleeSpeedMultiplier: 1.8
+  detectionRadius: 5.5
+  aggroRadius: 4.5
+  baseHP: 88
+  baseAttack: 50
+  baseDefense: 25
+  baseSpeed: 55
+  hpPerLevel: 6
+  atkPerLevel: 4
+  defPerLevel: 2
+  spdPerLevel: 3
+  moveSlot1: {fileID: 11400000, guid: 183f0fa13f901824ab9cd32a825676a1, type: 2}
+  moveSlot2: {fileID: 11400000, guid: d07119f0bc07a40408904a838d86e746, type: 2}
+  moveSlot3: {fileID: 11400000, guid: 2485d01a254d7ac4b9747bd5e6baaef6, type: 2}
+  moveSlot4: {fileID: 11400000, guid: 97ee1aad7d8db7b45a80e34607f475b7, type: 2}
+  soulTraitGrowthProfile: {fileID: 11400000, guid: 69f1bc565586a51419159099b9fecc3a,
+    type: 2}
+  nextEvolution: {fileID: 11400000, guid: 0f03c38486ec66b4ba2b16bb1b11eb3a, type: 2}
+  evolutionTrigger: 2
+  evolutionLevel: 0
+  evolutionBattleCount: 0
+  evolutionItem: 8
+  canDelayEvolution: 1
+  encounterCry: {fileID: 0}
+  battleCry: {fileID: 0}
+  faintSound: {fileID: 0}
