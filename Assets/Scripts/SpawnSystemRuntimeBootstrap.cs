@@ -44,6 +44,13 @@ public class SpawnSystemRuntimeBootstrap : MonoBehaviour
             {
                 bridge.battleSystem = bs;
             }
+
+            MiniMapController miniMap = player.GetComponent<MiniMapController>();
+            if (miniMap == null)
+            {
+                miniMap = player.AddComponent<MiniMapController>();
+            }
+            miniMap.enabled = true;
         }
 
         SpawnZone[] zones = FindObjectsByType<SpawnZone>(FindObjectsSortMode.None);

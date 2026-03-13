@@ -25,19 +25,58 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
     [Tooltip("How often the spawner checks if new wild creatures should be added.")]
     [Min(0.1f)]
-    public float spawnCheckInterval = 0.5f;
+    public float spawnCheckInterval = 0.65f;
 
     [Tooltip("Minimum distance from player when placing a new wild creature.")]
     [Min(0f)]
-    public float minSpawnDistanceFromPlayer = 4f;
+    public float minSpawnDistanceFromPlayer = 8f;
 
     [Tooltip("Maximum distance from player when placing a new wild creature.")]
     [Min(1f)]
-    public float maxSpawnDistanceFromPlayer = 24f;
+    public float maxSpawnDistanceFromPlayer = 30f;
 
     [Tooltip("How many random position attempts per spawn check.")]
     [Min(1)]
     public int spawnPositionAttempts = 24;
+
+    [Header("Spawn Rules")]
+    [Tooltip("Do not spawn while player is standing still.")]
+    public bool requirePlayerMovementForSpawning = true;
+
+    [Tooltip("Minimum player world speed required to allow spawning.")]
+    [Min(0f)]
+    public float minPlayerSpeedForSpawning = 0.05f;
+
+    [Tooltip("Bias spawn positions toward the direction the player is currently moving.")]
+    public bool spawnOnlyInMovementDirection = true;
+
+    [Tooltip("Minimum forward dot product relative to player movement direction. >0 means never behind player.")]
+    [Range(-1f, 1f)]
+    public float forwardSpawnMinDot = 0.1f;
+
+    [Tooltip("Do not spawn inside the current main camera frame.")]
+    public bool blockSpawningInCameraView = true;
+
+    [Tooltip("Extra world-space padding around camera frame considered blocked for spawning.")]
+    [Min(0f)]
+    public float cameraSpawnBlockPaddingWorld = 0.5f;
+
+    [Header("Density Tuning")]
+    [Tooltip("Scales max active wilds allowed for this zone (lower = sparser).")]
+    [Range(0.1f, 1f)]
+    public float densityMultiplier = 0.55f;
+
+    [Tooltip("Chance each spawn check can proceed while moving (lower = sparser).")]
+    [Range(0.05f, 1f)]
+    public float spawnAttemptChance = 0.65f;
+
+    [Tooltip("Multiply config respawn cooldown by this value.")]
+    [Min(0.1f)]
+    public float spawnCooldownMultiplier = 1.2f;
+
+    [Tooltip("Hard minimum cooldown between successful spawns.")]
+    [Min(0f)]
+    public float minimumSpawnCooldownSeconds = 1.0f;
 
     [Tooltip("World-space clearance radius used to avoid spawning inside colliders.")]
     [Min(0f)]
@@ -85,10 +124,16 @@ public class OverworldCreatureSpawner : MonoBehaviour
     private float nextSpawnAllowedTime;
     private int preparedConfigInstanceId = int.MinValue;
     private Transform frogScaleReference;
+    private Vector2 previousPlayerPosition;
+    private Vector2 playerMoveDirection = Vector2.right;
+    private float playerSpeed;
+    private float lastPlayerMotionSampleTime;
+    private bool hasPlayerMotionSample;
 
     void OnEnable()
     {
         TryFindPlayer();
+        ResetPlayerMotionSampling();
         RefreshActiveWildList();
         SyncManagerCount();
     }
@@ -101,6 +146,7 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
         EnsureActiveZoneReady();
         TryFindPlayer();
+        UpdatePlayerMotionState();
         RefreshActiveWildList();
         SyncManagerCount();
         TryDespawnFarCreatures();
@@ -117,9 +163,12 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
         if (!CanSpawnAtCurrentTime(config)) return;
         if (Time.time < nextSpawnAllowedTime) return;
+        if (requirePlayerMovementForSpawning && !IsPlayerMoving()) return;
+        if (Random.value > Mathf.Clamp01(spawnAttemptChance)) return;
 
         int cap = Mathf.Max(1, config.maxActiveCreatures);
-        if (activeWilds.Count >= cap) return;
+        int effectiveCap = Mathf.Max(1, Mathf.CeilToInt(cap * Mathf.Clamp(densityMultiplier, 0.1f, 1f)));
+        if (activeWilds.Count >= effectiveCap) return;
 
         if (!TryPickSpawnData(config, out CreatureEncounterData data)) return;
         if (!TryGetSpawnPoint(zone, out Vector3 spawnPos)) return;
@@ -129,8 +178,8 @@ public class OverworldCreatureSpawner : MonoBehaviour
             return;
         }
 
-        float cooldown = Mathf.Max(0f, config.respawnCooldownSeconds);
-        nextSpawnAllowedTime = Time.time + Mathf.Max(0.15f, cooldown);
+        float cooldown = Mathf.Max(0f, config.respawnCooldownSeconds) * Mathf.Max(0.1f, spawnCooldownMultiplier);
+        nextSpawnAllowedTime = Time.time + Mathf.Max(minimumSpawnCooldownSeconds, cooldown);
     }
 
     void EnsureProgressiveSpawnOdds(AreaSpawnConfig config)
@@ -331,12 +380,111 @@ public class OverworldCreatureSpawner : MonoBehaviour
             {
                 return false;
             }
+
+            if (spawnOnlyInMovementDirection && HasMovementDirection())
+            {
+                Vector2 toCandidate = candidate - playerPos;
+                if (toCandidate.sqrMagnitude > 0.0001f)
+                {
+                    float dot = Vector2.Dot(playerMoveDirection, toCandidate.normalized);
+                    if (dot < forwardSpawnMinDot) return false;
+                }
+            }
+        }
+
+        if (blockSpawningInCameraView && IsInsideMainCameraView(candidate, cameraSpawnBlockPaddingWorld))
+        {
+            return false;
         }
 
         if (IsBlocked(candidate, zoneCollider)) return false;
 
         spawnPos = new Vector3(candidate.x, candidate.y, 0f);
         return true;
+    }
+
+    void ResetPlayerMotionSampling()
+    {
+        if (player == null)
+        {
+            hasPlayerMotionSample = false;
+            playerSpeed = 0f;
+            return;
+        }
+
+        previousPlayerPosition = player.position;
+        lastPlayerMotionSampleTime = Time.time;
+        hasPlayerMotionSample = true;
+        playerSpeed = 0f;
+    }
+
+    void UpdatePlayerMotionState()
+    {
+        if (player == null)
+        {
+            hasPlayerMotionSample = false;
+            playerSpeed = 0f;
+            return;
+        }
+
+        float now = Time.time;
+        if (!hasPlayerMotionSample)
+        {
+            previousPlayerPosition = player.position;
+            lastPlayerMotionSampleTime = now;
+            hasPlayerMotionSample = true;
+            playerSpeed = 0f;
+            return;
+        }
+
+        float dt = Mathf.Max(0.0001f, now - lastPlayerMotionSampleTime);
+        Vector2 current = player.position;
+        Vector2 delta = current - previousPlayerPosition;
+        playerSpeed = delta.magnitude / dt;
+        if (delta.sqrMagnitude > 0.000001f)
+        {
+            playerMoveDirection = delta.normalized;
+        }
+
+        previousPlayerPosition = current;
+        lastPlayerMotionSampleTime = now;
+    }
+
+    bool IsPlayerMoving()
+    {
+        return player != null && playerSpeed >= Mathf.Max(0f, minPlayerSpeedForSpawning);
+    }
+
+    bool HasMovementDirection()
+    {
+        return playerMoveDirection.sqrMagnitude > 0.0001f;
+    }
+
+    bool IsInsideMainCameraView(Vector2 worldPoint, float paddingWorld)
+    {
+        Camera cam = Camera.main;
+        if (cam == null) return false;
+
+        Vector3 camPos = cam.transform.position;
+        float pad = Mathf.Max(0f, paddingWorld);
+
+        if (cam.orthographic)
+        {
+            float halfHeight = Mathf.Max(0.001f, cam.orthographicSize);
+            float halfWidth = Mathf.Max(0.001f, halfHeight * cam.aspect);
+            float minX = camPos.x - halfWidth - pad;
+            float maxX = camPos.x + halfWidth + pad;
+            float minY = camPos.y - halfHeight - pad;
+            float maxY = camPos.y + halfHeight + pad;
+            return worldPoint.x >= minX && worldPoint.x <= maxX && worldPoint.y >= minY && worldPoint.y <= maxY;
+        }
+
+        Vector3 viewport = cam.WorldToViewportPoint(new Vector3(worldPoint.x, worldPoint.y, 0f));
+        return viewport.z > 0f &&
+               viewport.x >= -0.01f &&
+               viewport.x <= 1.01f &&
+               viewport.y >= -0.01f &&
+               viewport.y <= 1.01f;
     }
 
     bool IsBlocked(Vector2 point, Collider2D zoneCollider)
@@ -573,7 +721,11 @@ public class OverworldCreatureSpawner : MonoBehaviour
     {
         if (player != null) return;
         GameObject go = GameObject.Find("Player");
-        if (go != null) player = go.transform;
+        if (go != null)
+        {
+            player = go.transform;
+            ResetPlayerMotionSampling();
+        }
     }
 
     void SyncManagerCount()
