@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using UnityEngine.Rendering;
 
 #if UNITY_EDITOR
@@ -195,7 +196,7 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         widthRatio = 0.35f;
         heightRatio = 0.20f;
 
-        string n = (sr.gameObject.name + " " + sr.transform.root.name).ToLowerInvariant();
+        string n = (sr.gameObject.name + " " + sr.transform.root.name + " " + sr.sprite.name).ToLowerInvariant();
 
         if (n.Contains("tree"))
         {
@@ -266,8 +267,22 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
 
         Transform root = t.root;
         if (root == null || root == t) return false;
-        string rn = root.name.ToLowerInvariant();
-        if (!rn.Contains("house") && !rn.Contains("hut") && !rn.Contains("building")) return false;
+        bool isHouseLike = IsHouseLikeName(root.name);
+        if (!isHouseLike)
+        {
+            SpriteRenderer[] rootSprites = root.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int i = 0; i < rootSprites.Length; i++)
+            {
+                SpriteRenderer rs = rootSprites[i];
+                if (rs == null || rs.sprite == null) continue;
+                if (IsHouseLikeName(rs.sprite.name))
+                {
+                    isHouseLike = true;
+                    break;
+                }
+            }
+        }
+        if (!isHouseLike) return false;
 
         return root.GetComponent<BoxCollider2D>() != null;
     }
@@ -302,6 +317,17 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
             topDown.sortMode = TopDownSorter.SortMode.RendererBottomY;
             topDown.useSortingGroupIfPresent = true;
             topDown.setSpriteSortPointToPivot = true;
+            topDown.orderOffset = 0;
+            topDown.orderMultiplier = 100;
+        }
+
+        TopDownSorter[] childSorters = target.GetComponentsInChildren<TopDownSorter>(true);
+        for (int i = 0; i < childSorters.Length; i++)
+        {
+            TopDownSorter s = childSorters[i];
+            if (s == null || s.gameObject == target) continue;
+            if (Application.isPlaying) Destroy(s);
+            else DestroyImmediate(s);
         }
 
         BoxCollider2D box = target.GetComponent<BoxCollider2D>();
@@ -333,10 +359,19 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         Transform root = sr.transform.root;
         if (root == null) return sr.gameObject;
 
-        string rn = root.name.ToLowerInvariant();
-        if (rn.Contains("house") || rn.Contains("hut") || rn.Contains("building"))
+        if (IsHouseLikeName(root.name))
         {
             return root.gameObject;
+        }
+        SpriteRenderer[] rootSprites = root.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < rootSprites.Length; i++)
+        {
+            SpriteRenderer rs = rootSprites[i];
+            if (rs == null || rs.sprite == null) continue;
+            if (IsHouseLikeName(rs.sprite.name))
+            {
+                return root.gameObject;
+            }
         }
         return sr.gameObject;
     }
@@ -406,9 +441,10 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         {
             SpriteRenderer sr = all[i];
             if (sr == null || sr.sprite == null) continue;
-
-            bool isObstacle = TryClassifyObstacle(sr, out string obstacleKind, out _, out _);
-            if (!isObstacle || obstacleKind != "House") continue;
+            if (!IsHouseLikeName(sr.sprite.name) && !IsHouseLikeName(sr.gameObject.name) && !IsHouseLikeName(sr.transform.root.name))
+            {
+                continue;
+            }
 
             GameObject root = ResolveHouseRootObject(sr);
             if (root == null) continue;
@@ -448,23 +484,14 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         variant = -1;
         if (string.IsNullOrWhiteSpace(name)) return false;
 
-        string n = name.ToLowerInvariant();
-        const string oldPrefix = "house_";
-        const string newPrefix = "house_scaled_1x_pngcrushed_";
+        string n = name.ToLowerInvariant().Trim();
+        if (!IsHouseLikeName(n)) return false;
 
-        if (n.StartsWith(oldPrefix))
-        {
-            string tail = n.Substring(oldPrefix.Length);
-            return int.TryParse(tail, out variant);
-        }
+        MatchCollection matches = Regex.Matches(n, @"\d+");
+        if (matches == null || matches.Count == 0) return false;
 
-        if (n.StartsWith(newPrefix))
-        {
-            string tail = n.Substring(newPrefix.Length);
-            return int.TryParse(tail, out variant);
-        }
-
-        return false;
+        string tailDigits = matches[matches.Count - 1].Value;
+        return int.TryParse(tailDigits, out variant);
     }
 
     private static void AlignHouseSortingWithPlayer(GameObject houseRoot)
@@ -499,6 +526,14 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
             SpriteRenderer sr = srs[i];
             if (sr == null) continue;
             sr.sortingLayerID = targetSortingLayerId;
+            sr.spriteSortPoint = SpriteSortPoint.Pivot;
         }
+    }
+
+    private static bool IsHouseLikeName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        string n = value.ToLowerInvariant();
+        return n.Contains("house") || n.Contains("hut") || n.Contains("building");
     }
 }
