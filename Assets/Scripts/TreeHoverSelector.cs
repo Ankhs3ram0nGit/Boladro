@@ -551,6 +551,9 @@ public class TreeHoverSelector : MonoBehaviour
             return true;
         }
 
+        Collider2D collider = t.GetComponent<Collider2D>();
+        if (collider == null) return false;
+
         string n = t.name.ToLowerInvariant();
         if (n.Contains("rock") || n.Contains("stone") || n.Contains("tree"))
         {
@@ -576,6 +579,8 @@ public class TreeHoverSelector : MonoBehaviour
             kind = HarvestKind.Tree;
             return true;
         }
+
+        if (root.GetComponent<Collider2D>() == null) return false;
 
         string n = root.name.ToLowerInvariant();
         if (n.Contains("rock") || n.Contains("stone"))
@@ -620,7 +625,7 @@ public class TreeHoverSelector : MonoBehaviour
             if (entry == null || entry.root == null) continue;
             if (!entry.root.gameObject.activeInHierarchy && !includeInactiveTrees) continue;
 
-            if (!TryGetCombinedBounds(entry.renderers, out Bounds b)) continue;
+            if (!TryGetInteractionBounds(entry, out Bounds b)) continue;
 
             bool contains = probe.x >= b.min.x && probe.x <= b.max.x && probe.y >= b.min.y && probe.y <= b.max.y;
             if (!contains) continue;
@@ -635,6 +640,62 @@ public class TreeHoverSelector : MonoBehaviour
         }
 
         return hovered != null;
+    }
+
+    bool TryGetInteractionBounds(HarvestEntry entry, out Bounds bounds)
+    {
+        bounds = default;
+        if (entry == null || entry.renderers == null) return false;
+
+        if (entry.kind == HarvestKind.Tree)
+        {
+            if (TryGetCombinedBoundsFiltered(entry.renderers, IsTreeUpperRenderer, out bounds)) return true;
+            if (TryGetCombinedBoundsFiltered(entry.renderers, sr => !IsTreeLowerRenderer(sr) && !IsShadowRenderer(sr), out bounds)) return true;
+            if (TryGetCombinedBounds(entry.renderers, false, out bounds)) return true;
+            return TryGetCombinedBounds(entry.renderers, out bounds);
+        }
+
+        return TryGetCombinedBounds(entry.renderers, out bounds);
+    }
+
+    bool TryGetCombinedBoundsFiltered(SpriteRenderer[] renderers, Func<SpriteRenderer, bool> includePredicate, out Bounds bounds)
+    {
+        bounds = default;
+        bool hasAny = false;
+        if (renderers == null || includePredicate == null) return false;
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            SpriteRenderer sr = renderers[i];
+            if (sr == null || !sr.enabled || sr.sprite == null) continue;
+            if (!includePredicate(sr)) continue;
+
+            if (!hasAny)
+            {
+                bounds = sr.bounds;
+                hasAny = true;
+            }
+            else
+            {
+                bounds.Encapsulate(sr.bounds);
+            }
+        }
+
+        return hasAny;
+    }
+
+    static bool IsTreeUpperRenderer(SpriteRenderer sr)
+    {
+        if (sr == null) return false;
+        string n = sr.gameObject.name.ToLowerInvariant();
+        return n.Contains("upper");
+    }
+
+    static bool IsTreeLowerRenderer(SpriteRenderer sr)
+    {
+        if (sr == null) return false;
+        string n = sr.gameObject.name.ToLowerInvariant();
+        return n.Contains("lower");
     }
 
     bool TryGetCombinedBounds(SpriteRenderer[] renderers, out Bounds bounds)
