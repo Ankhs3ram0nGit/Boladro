@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine.Rendering;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -295,6 +296,13 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
             TopDownSorter sorter = target.AddComponent<TopDownSorter>();
             sorter.sortMode = TopDownSorter.SortMode.RendererBottomY;
         }
+        TopDownSorter topDown = target.GetComponent<TopDownSorter>();
+        if (topDown != null)
+        {
+            topDown.sortMode = TopDownSorter.SortMode.RendererBottomY;
+            topDown.useSortingGroupIfPresent = true;
+            topDown.setSpriteSortPointToPivot = true;
+        }
 
         BoxCollider2D box = target.GetComponent<BoxCollider2D>();
         if (box == null)
@@ -303,11 +311,20 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
             InitializeHouseColliderFromSprites(target, box);
         }
 
+        if (TryResolveHouseVariantIndex(target, out int variant) &&
+            TryGetGroupedHouseColliderTemplate(variant, target, out Vector2 groupedSize, out Vector2 groupedOffset))
+        {
+            box.size = groupedSize;
+            box.offset = groupedOffset;
+        }
+
         box.isTrigger = false;
 
         FootColliderMarker marker = target.GetComponent<FootColliderMarker>();
         if (marker == null) marker = target.AddComponent<FootColliderMarker>();
         marker.obstacleKind = "House";
+
+        AlignHouseSortingWithPlayer(target);
     }
 
     private static GameObject ResolveHouseRootObject(SpriteRenderer sr)
@@ -364,5 +381,124 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
 
         box.size = new Vector2(Mathf.Abs(maxLocal.x - minLocal.x), Mathf.Abs(maxLocal.y - minLocal.y));
         box.offset = new Vector2(centerLocal.x, centerLocal.y);
+    }
+
+    private static bool TryGetGroupedHouseColliderTemplate(int variant, GameObject selfRoot, out Vector2 size, out Vector2 offset)
+    {
+        size = Vector2.zero;
+        offset = Vector2.zero;
+
+        int templateVariant = -1;
+        if (variant >= 1 && variant <= 3) templateVariant = 0;
+        else if (variant >= 5 && variant <= 7) templateVariant = 4;
+        else return false; // Keep 0,4 (and others) as manually tuned/independent.
+
+        return TryFindHouseColliderTemplate(templateVariant, selfRoot, out size, out offset);
+    }
+
+    private static bool TryFindHouseColliderTemplate(int templateVariant, GameObject selfRoot, out Vector2 size, out Vector2 offset)
+    {
+        size = Vector2.zero;
+        offset = Vector2.zero;
+
+        SpriteRenderer[] all = FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None);
+        for (int i = 0; i < all.Length; i++)
+        {
+            SpriteRenderer sr = all[i];
+            if (sr == null || sr.sprite == null) continue;
+
+            bool isObstacle = TryClassifyObstacle(sr, out string obstacleKind, out _, out _);
+            if (!isObstacle || obstacleKind != "House") continue;
+
+            GameObject root = ResolveHouseRootObject(sr);
+            if (root == null) continue;
+            if (selfRoot != null && root == selfRoot) continue;
+            if (!TryResolveHouseVariantIndex(root, out int idx)) continue;
+            if (idx != templateVariant) continue;
+
+            BoxCollider2D box = root.GetComponent<BoxCollider2D>();
+            if (box == null) continue;
+
+            size = box.size;
+            offset = box.offset;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveHouseVariantIndex(GameObject root, out int variant)
+    {
+        variant = -1;
+        if (root == null) return false;
+
+        SpriteRenderer[] srs = root.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr == null || sr.sprite == null) continue;
+            if (TryParseHouseVariant(sr.sprite.name, out variant)) return true;
+        }
+
+        return TryParseHouseVariant(root.name, out variant);
+    }
+
+    private static bool TryParseHouseVariant(string name, out int variant)
+    {
+        variant = -1;
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
+        string n = name.ToLowerInvariant();
+        const string oldPrefix = "house_";
+        const string newPrefix = "house_scaled_1x_pngcrushed_";
+
+        if (n.StartsWith(oldPrefix))
+        {
+            string tail = n.Substring(oldPrefix.Length);
+            return int.TryParse(tail, out variant);
+        }
+
+        if (n.StartsWith(newPrefix))
+        {
+            string tail = n.Substring(newPrefix.Length);
+            return int.TryParse(tail, out variant);
+        }
+
+        return false;
+    }
+
+    private static void AlignHouseSortingWithPlayer(GameObject houseRoot)
+    {
+        if (houseRoot == null) return;
+
+        int targetSortingLayerId = 0;
+        bool hasTargetLayer = false;
+
+        PlayerMover player = FindAnyObjectByType<PlayerMover>();
+        if (player != null)
+        {
+            SpriteRenderer playerSr = player.GetComponent<SpriteRenderer>();
+            if (playerSr != null)
+            {
+                targetSortingLayerId = playerSr.sortingLayerID;
+                hasTargetLayer = true;
+            }
+        }
+
+        if (!hasTargetLayer) return;
+
+        SortingGroup group = houseRoot.GetComponent<SortingGroup>();
+        if (group != null)
+        {
+            group.sortingLayerID = targetSortingLayerId;
+        }
+
+        SpriteRenderer[] srs = houseRoot.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr == null) continue;
+            sr.sortingLayerID = targetSortingLayerId;
+        }
     }
 }
