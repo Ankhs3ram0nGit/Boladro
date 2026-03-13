@@ -6,7 +6,6 @@ using UnityEngine.Tilemaps;
 using UnityEditor;
 #endif
 
-[ExecuteAlways]
 [RequireComponent(typeof(Tilemap))]
 public class MapPainter : MonoBehaviour
 {
@@ -16,7 +15,7 @@ public class MapPainter : MonoBehaviour
     public int width = 128;
     public int height = 96;
     public int seed = 27;
-    public bool autoGenerateOnEnable = true;
+    public bool autoGenerateOnEnable = false;
     public bool useSpringOverlay = false;
 
     [Header("Primary Tile Source")]
@@ -65,9 +64,11 @@ public class MapPainter : MonoBehaviour
 
     void OnEnable()
     {
-        // Keep heavy map/procedural prop generation in edit mode only.
-        // Running this on play start can stall startup if many generated props
-        // are queued for deferred destruction.
+        // Keep heavy map/procedural prop generation in edit mode only, and never
+        // during play mode transitions.
+#if UNITY_EDITOR
+        if (UnityEditor.EditorApplication.isPlayingOrWillChangePlaymode) return;
+#endif
         if (autoGenerateOnEnable && !Application.isPlaying)
         {
             Paint();
@@ -77,6 +78,11 @@ public class MapPainter : MonoBehaviour
     [ContextMenu("Paint")]
     public void Paint()
     {
+#if UNITY_EDITOR
+        if (UnityEditor.EditorApplication.isPlayingOrWillChangePlaymode) return;
+#endif
+        if (Application.isPlaying) return;
+
         EnsureSources();
         if (springTileset == null && grass == null)
         {
