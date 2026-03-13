@@ -314,7 +314,7 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         TopDownSorter topDown = target.GetComponent<TopDownSorter>();
         if (topDown != null)
         {
-            topDown.sortMode = TopDownSorter.SortMode.RendererBottomY;
+            topDown.sortMode = TopDownSorter.SortMode.FeetTransformY;
             topDown.useSortingGroupIfPresent = true;
             topDown.setSpriteSortPointToPivot = true;
             topDown.orderOffset = 0;
@@ -345,12 +345,36 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         }
 
         box.isTrigger = false;
+        EnsureHouseSortAnchor(target, box, topDown);
 
         FootColliderMarker marker = target.GetComponent<FootColliderMarker>();
         if (marker == null) marker = target.AddComponent<FootColliderMarker>();
         marker.obstacleKind = "House";
 
         AlignHouseSortingWithPlayer(target);
+    }
+
+    private static void EnsureHouseSortAnchor(GameObject houseRoot, BoxCollider2D box, TopDownSorter topDown)
+    {
+        if (houseRoot == null || box == null || topDown == null) return;
+
+        const string anchorName = "__HouseSortAnchor";
+        Transform anchor = houseRoot.transform.Find(anchorName);
+        if (anchor == null)
+        {
+            GameObject go = new GameObject(anchorName);
+            go.transform.SetParent(houseRoot.transform, false);
+            anchor = go.transform;
+        }
+
+        // Match the same Y reference used by occlusion fade (collider top).
+        anchor.localPosition = new Vector3(
+            box.offset.x,
+            box.offset.y + (box.size.y * 0.5f),
+            0f
+        );
+        topDown.feetTransform = anchor;
+        topDown.sortMode = TopDownSorter.SortMode.FeetTransformY;
     }
 
     private static GameObject ResolveHouseRootObject(SpriteRenderer sr)
