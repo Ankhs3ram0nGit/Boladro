@@ -297,6 +297,12 @@ public class WildCreatureAI : MonoBehaviour
         if (sr != null) sr.transform.localScale = baseScale;
     }
 
+    public void RefreshScaleBaseline()
+    {
+        if (sr == null) sr = GetComponent<SpriteRenderer>();
+        if (sr != null) baseScale = sr.transform.localScale;
+    }
+
     // For future weapon hits from player scripts.
     public void NotifyDamagedByPlayer()
     {

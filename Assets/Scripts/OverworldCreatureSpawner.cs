@@ -67,6 +67,14 @@ public class OverworldCreatureSpawner : MonoBehaviour
     [Tooltip("Deprecated: when false, AreaSpawnConfig remains the authoritative spawn source.")]
     public bool enforceProgressiveStageOdds = false;
 
+    [Header("Visual Scale")]
+    [Tooltip("If enabled, wild creature scale baseline is taken from the Frog transform scale.")]
+    public bool useFrogScaleAsSpawnBaseline = true;
+
+    [Tooltip("Fallback baseline scale when Frog cannot be found.")]
+    [Min(0.05f)]
+    public float fallbackSpawnScaleBaseline = 1f;
+
     private readonly List<WildCreatureAI> activeWilds = new List<WildCreatureAI>();
     private readonly Dictionary<string, Sprite> spriteCache = new Dictionary<string, Sprite>();
     private readonly HashSet<string> missingSpriteCache = new HashSet<string>();
@@ -76,6 +84,7 @@ public class OverworldCreatureSpawner : MonoBehaviour
     private float nextCheckTime;
     private float nextSpawnAllowedTime;
     private int preparedConfigInstanceId = int.MinValue;
+    private Transform frogScaleReference;
 
     void OnEnable()
     {
@@ -414,6 +423,7 @@ public class OverworldCreatureSpawner : MonoBehaviour
         {
             bounce.RefreshDefaultSprite();
         }
+        ai.RefreshScaleBaseline();
 
         activeWilds.Add(ai);
         SyncManagerCount();
@@ -746,9 +756,32 @@ public class OverworldCreatureSpawner : MonoBehaviour
         if (target == null || def == null || sprite == null) return;
 
         // Sprite world size already derives from import PPU when localScale = 1.
-        // Keep scale tied to definition multiplier only, so PPU drives the baseline.
-        float scale = Mathf.Max(0.05f, def.overworldSizeMultiplier);
+        // Baseline is Frog scale (when enabled), then definition multiplier is applied on top.
+        float baseline = ResolveSpawnScaleBaseline();
+        float scale = Mathf.Max(0.05f, baseline * Mathf.Max(0.05f, def.overworldSizeMultiplier));
         target.localScale = new Vector3(scale, scale, 1f);
+    }
+
+    float ResolveSpawnScaleBaseline()
+    {
+        if (!useFrogScaleAsSpawnBaseline)
+        {
+            return Mathf.Max(0.05f, fallbackSpawnScaleBaseline);
+        }
+
+        if (frogScaleReference == null)
+        {
+            GameObject frog = GameObject.Find("Frog");
+            if (frog != null) frogScaleReference = frog.transform;
+        }
+
+        if (frogScaleReference != null)
+        {
+            float frogScale = Mathf.Abs(frogScaleReference.localScale.x);
+            if (frogScale >= 0.01f) return frogScale;
+        }
+
+        return Mathf.Max(0.05f, fallbackSpawnScaleBaseline);
     }
 
 }
