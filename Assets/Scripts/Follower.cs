@@ -13,7 +13,7 @@ public class Follower : MonoBehaviour
     public float hopLandTime = 0.12f;
     public float hopPauseTime = 0.10f;
     public float hopArcHeight = 0.18f;
-    public bool spriteFacesRight = true;
+    public bool spriteFacesRight = false;
 
     private SpriteRenderer sr;
     private Vector3 baseScale = Vector3.one;
@@ -28,6 +28,13 @@ public class Follower : MonoBehaviour
         if (GetComponent<CreatureGroundShadow>() == null)
         {
             gameObject.AddComponent<CreatureGroundShadow>();
+        }
+        FaceTarget2D faceTarget = GetComponent<FaceTarget2D>();
+        if (faceTarget != null)
+        {
+            // Preserve authored orientation metadata, but movement-facing should come from Follower logic.
+            spriteFacesRight = faceTarget.spriteFacesRight;
+            faceTarget.enabled = false;
         }
         sr = GetComponent<SpriteRenderer>();
         if (sr != null) baseScale = sr.transform.localScale;

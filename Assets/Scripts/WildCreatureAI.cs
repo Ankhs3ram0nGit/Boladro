@@ -25,7 +25,9 @@ public class WildCreatureAI : MonoBehaviour
     public float attackRange = 0.8f;
     public float attackCooldown = 1.0f;
     public int contactDamage = 1;
-    public bool spriteFacesRight = true;
+    public bool spriteFacesRight = false;
+    [Tooltip("If true, use CreatureDefinition.facingDirection to override sprite orientation.")]
+    public bool applyFacingFromDefinition;
     public float hopTilesPerMove = 2f;
     public float minHopTilesPerMove = 1f;
     public float maxHopTilesPerMove = 2f;
@@ -78,8 +80,11 @@ public class WildCreatureAI : MonoBehaviour
         }
 
         FaceTarget2D faceTarget = GetComponent<FaceTarget2D>();
+        if (faceTarget == null) faceTarget = GetComponentInChildren<FaceTarget2D>(true);
         if (faceTarget != null)
         {
+            // Reuse authored sprite orientation config, but let WildCreatureAI control runtime facing.
+            spriteFacesRight = faceTarget.spriteFacesRight;
             // Wild movement controls facing. Prevent target-facing script override.
             faceTarget.enabled = false;
         }
@@ -99,7 +104,7 @@ public class WildCreatureAI : MonoBehaviour
         // Existing hop timings are scaled by movementSpeedMultiplier (higher = faster).
         movementSpeedMultiplier = Mathf.Clamp(baseMoveSpeed / 7.5f, 0.20f, 1.20f);
 
-        if (Mathf.Abs(def.facingDirection.x) > 0.001f)
+        if (applyFacingFromDefinition && Mathf.Abs(def.facingDirection.x) > 0.001f)
         {
             spriteFacesRight = def.facingDirection.x >= 0f;
         }
