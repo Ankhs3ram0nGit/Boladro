@@ -27,8 +27,6 @@ public class TreeHoverSelector : MonoBehaviour
     public float fallbackTileWorldSize = 1f;
     public float selectorPadding = 1.08f;
     public bool includeInactiveTrees;
-    [Range(0f, 0.8f)] public float treeInteractMinYNormalized = 0.45f;
-    [Range(0.2f, 1f)] public float treeInteractMaxYNormalized = 0.98f;
 
     [Header("Rendering")]
     public int sortingOrderBoost = 300;
@@ -141,8 +139,8 @@ public class TreeHoverSelector : MonoBehaviour
     private SpriteRenderer selectorRenderer;
     private Transform selectorTransform;
     private HarvestEntry activeHoveredTarget;
-    private Bounds activeHoveredHitBounds;
-    private bool hasActiveHoveredHitBounds;
+    private readonly HashSet<int> nonReadableTextureIds = new HashSet<int>();
+    private readonly List<Vector2> spritePhysicsPoints = new List<Vector2>(32);
 
     private Sprite cachedWoodSprite;
     private Sprite cachedStoneSprite;
@@ -172,7 +170,6 @@ public class TreeHoverSelector : MonoBehaviour
         StopAllSquashRoutines();
         SetSelectorVisible(false);
         activeHoveredTarget = null;
-        hasActiveHoveredHitBounds = false;
     }
 
     void OnDestroy()
@@ -215,7 +212,6 @@ public class TreeHoverSelector : MonoBehaviour
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
-            hasActiveHoveredHitBounds = false;
             return;
         }
 
@@ -223,7 +219,6 @@ public class TreeHoverSelector : MonoBehaviour
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
-            hasActiveHoveredHitBounds = false;
             return;
         }
 
@@ -231,15 +226,13 @@ public class TreeHoverSelector : MonoBehaviour
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
-            hasActiveHoveredHitBounds = false;
             return;
         }
 
-        if (!TryGetHoveredTarget(mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds, out Bounds hoveredHitBounds))
+        if (!TryGetHoveredTarget(mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds))
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
-            hasActiveHoveredHitBounds = false;
             return;
         }
 
@@ -252,8 +245,6 @@ public class TreeHoverSelector : MonoBehaviour
 
         RenderSelector(hovered, hoveredBounds);
         activeHoveredTarget = hovered;
-        activeHoveredHitBounds = hoveredHitBounds;
-        hasActiveHoveredHitBounds = true;
     }
 
     void EnsureSelectorObject()
@@ -318,8 +309,8 @@ public class TreeHoverSelector : MonoBehaviour
         if (!registerPickaxeHits) return;
         if (selectorRenderer == null || !selectorRenderer.enabled) return;
         if (activeHoveredTarget == null || activeHoveredTarget.root == null) return;
-        if (!hasActiveHoveredHitBounds) return;
-        if (!IsMouseInsideBounds(activeHoveredHitBounds)) return;
+        if (!TryGetMouseWorldPoint(out Vector2 mouseWorld)) return;
+        if (!IsPointInsideEntryInteraction(activeHoveredTarget, mouseWorld, out _)) return;
 
         if (!ApplyPickaxeDamageToTarget(activeHoveredTarget))
         {
@@ -327,14 +318,6 @@ public class TreeHoverSelector : MonoBehaviour
         }
 
         StartTargetSquash(activeHoveredTarget);
-    }
-
-    bool IsMouseInsideBounds(Bounds bounds)
-    {
-        if (!TryGetMouseWorldPoint(out Vector2 mouseWorld)) return false;
-        Vector3 probe = new Vector3(mouseWorld.x, mouseWorld.y, 0f);
-        return probe.x >= bounds.min.x && probe.x <= bounds.max.x &&
-               probe.y >= bounds.min.y && probe.y <= bounds.max.y;
     }
 
     void StartTargetSquash(HarvestEntry target)
@@ -633,124 +616,143 @@ public class TreeHoverSelector : MonoBehaviour
         return string.Equals(kind, "Tree", StringComparison.OrdinalIgnoreCase);
     }
 
-    bool TryGetHoveredTarget(Vector2 mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds, out Bounds hoveredHitBounds)
+    bool TryGetHoveredTarget(Vector2 mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds)
     {
         hovered = null;
         hoveredBounds = default;
-        hoveredHitBounds = default;
         float bestDistance = float.MaxValue;
 
-        Vector3 probe = new Vector3(mouseWorld.x, mouseWorld.y, 0f);
         for (int i = 0; i < harvestEntries.Count; i++)
         {
             HarvestEntry entry = harvestEntries[i];
             if (entry == null || entry.root == null) continue;
             if (!entry.root.gameObject.activeInHierarchy && !includeInactiveTrees) continue;
 
-            if (!TryGetHoverBounds(entry, out Bounds b)) continue;
-            if (!TryGetInteractionBounds(entry, out Bounds hitBounds)) continue;
+            if (!TryGetSelectorDisplayBounds(entry, out Bounds displayBounds)) continue;
+            if (!IsPointInsideEntryInteraction(entry, mouseWorld, out float distance)) continue;
 
-            bool contains = probe.x >= b.min.x && probe.x <= b.max.x && probe.y >= b.min.y && probe.y <= b.max.y;
-            if (!contains) continue;
-
-            float centerDist = Vector2.Distance(mouseWorld, new Vector2(b.center.x, b.center.y));
-            if (centerDist < bestDistance)
+            if (distance < bestDistance)
             {
-                bestDistance = centerDist;
+                bestDistance = distance;
                 hovered = entry;
-                hoveredBounds = b;
-                hoveredHitBounds = hitBounds;
+                hoveredBounds = displayBounds;
             }
         }
 
         return hovered != null;
     }
 
-    bool TryGetHoverBounds(HarvestEntry entry, out Bounds bounds)
+    bool IsPointInsideEntryInteraction(HarvestEntry entry, Vector2 worldPoint, out float distanceMetric)
     {
-        bounds = default;
+        distanceMetric = float.MaxValue;
         if (entry == null || entry.renderers == null) return false;
 
-        if (entry.kind == HarvestKind.Tree)
+        bool hitAny = false;
+        for (int i = 0; i < entry.renderers.Length; i++)
         {
-            return TryGetCombinedBounds(entry.renderers, false, out bounds);
+            SpriteRenderer sr = entry.renderers[i];
+            if (sr == null || !sr.enabled || sr.sprite == null) continue;
+            if (IsShadowRenderer(sr)) continue;
+            if (!IsPointInsideRenderer(sr, worldPoint)) continue;
+
+            hitAny = true;
+            Vector2 c = new Vector2(sr.bounds.center.x, sr.bounds.center.y);
+            float d = Vector2.Distance(worldPoint, c);
+            if (d < distanceMetric) distanceMetric = d;
         }
 
-        return TryGetCombinedBounds(entry.renderers, out bounds);
+        return hitAny;
     }
 
-    bool TryGetInteractionBounds(HarvestEntry entry, out Bounds bounds)
+    bool IsPointInsideRenderer(SpriteRenderer sr, Vector2 worldPoint)
     {
-        bounds = default;
-        if (entry == null || entry.renderers == null) return false;
+        if (sr == null || sr.sprite == null || !sr.enabled) return false;
 
-        if (entry.kind == HarvestKind.Tree)
+        Bounds wb = sr.bounds;
+        if (worldPoint.x < wb.min.x || worldPoint.x > wb.max.x || worldPoint.y < wb.min.y || worldPoint.y > wb.max.y)
         {
-            if (TryGetCombinedBoundsFiltered(entry.renderers, sr => !IsShadowRenderer(sr), out bounds))
-            {
-                bounds = TrimBoundsVerticalNormalized(bounds, treeInteractMinYNormalized, treeInteractMaxYNormalized);
-                return true;
-            }
             return false;
         }
 
-        return TryGetCombinedBounds(entry.renderers, out bounds);
-    }
+        Sprite sp = sr.sprite;
+        Texture2D tex = sp.texture;
+        if (tex == null) return true;
 
-    Bounds TrimBoundsVerticalNormalized(Bounds source, float minYNormalized, float maxYNormalized)
-    {
-        float minN = Mathf.Clamp01(minYNormalized);
-        float maxN = Mathf.Clamp(maxYNormalized, minN + 0.05f, 1f);
-        if (minN <= 0.0001f && maxN >= 0.9999f) return source;
-
-        float minY = Mathf.Lerp(source.min.y, source.max.y, minN);
-        float maxY = Mathf.Lerp(source.min.y, source.max.y, maxN);
-        float h = Mathf.Max(0.0001f, maxY - minY);
-        float centerY = minY + (h * 0.5f);
-
-        return new Bounds(
-            new Vector3(source.center.x, centerY, source.center.z),
-            new Vector3(source.size.x, h, source.size.z));
-    }
-
-    bool TryGetCombinedBoundsFiltered(SpriteRenderer[] renderers, Func<SpriteRenderer, bool> includePredicate, out Bounds bounds)
-    {
-        bounds = default;
-        bool hasAny = false;
-        if (renderers == null || includePredicate == null) return false;
-
-        for (int i = 0; i < renderers.Length; i++)
+        int texId = tex.GetInstanceID();
+        if (nonReadableTextureIds.Contains(texId))
         {
-            SpriteRenderer sr = renderers[i];
-            if (sr == null || !sr.enabled || sr.sprite == null) continue;
-            if (!includePredicate(sr)) continue;
-
-            if (!hasAny)
-            {
-                bounds = sr.bounds;
-                hasAny = true;
-            }
-            else
-            {
-                bounds.Encapsulate(sr.bounds);
-            }
+            return true;
         }
 
-        return hasAny;
+        try
+        {
+            Vector3 local3 = sr.transform.InverseTransformPoint(new Vector3(worldPoint.x, worldPoint.y, sr.transform.position.z));
+            Bounds sb = sp.bounds;
+            if (local3.x < sb.min.x || local3.x > sb.max.x || local3.y < sb.min.y || local3.y > sb.max.y)
+            {
+                return false;
+            }
+
+            Vector2 local2 = new Vector2(local3.x, local3.y);
+            if (IsPointInsideSpritePhysicsShape(sp, local2))
+            {
+                return true;
+            }
+
+            float u = Mathf.InverseLerp(sb.min.x, sb.max.x, local3.x);
+            float v = Mathf.InverseLerp(sb.min.y, sb.max.y, local3.y);
+            if (sr.flipX) u = 1f - u;
+            if (sr.flipY) v = 1f - v;
+
+            Rect tr = sp.textureRect;
+            int minX = Mathf.FloorToInt(tr.xMin);
+            int maxX = Mathf.Max(minX, Mathf.CeilToInt(tr.xMax) - 1);
+            int minY = Mathf.FloorToInt(tr.yMin);
+            int maxY = Mathf.Max(minY, Mathf.CeilToInt(tr.yMax) - 1);
+
+            int px = Mathf.Clamp(Mathf.RoundToInt(minX + (u * (maxX - minX))), minX, maxX);
+            int py = Mathf.Clamp(Mathf.RoundToInt(minY + (v * (maxY - minY))), minY, maxY);
+            Color c = tex.GetPixel(px, py);
+            return c.a > 0.05f;
+        }
+        catch (UnityException)
+        {
+            nonReadableTextureIds.Add(texId);
+            return true;
+        }
     }
 
-    static bool IsTreeUpperRenderer(SpriteRenderer sr)
+    bool IsPointInsideSpritePhysicsShape(Sprite sprite, Vector2 localPoint)
     {
-        if (sr == null) return false;
-        string n = sr.gameObject.name.ToLowerInvariant();
-        return n.Contains("upper");
+        if (sprite == null) return false;
+        int shapeCount = sprite.GetPhysicsShapeCount();
+        if (shapeCount <= 0) return false;
+
+        for (int shapeIndex = 0; shapeIndex < shapeCount; shapeIndex++)
+        {
+            spritePhysicsPoints.Clear();
+            sprite.GetPhysicsShape(shapeIndex, spritePhysicsPoints);
+            if (spritePhysicsPoints.Count < 3) continue;
+            if (IsPointInPolygon(localPoint, spritePhysicsPoints)) return true;
+        }
+
+        return false;
     }
 
-    static bool IsTreeLowerRenderer(SpriteRenderer sr)
+    static bool IsPointInPolygon(Vector2 p, List<Vector2> polygon)
     {
-        if (sr == null) return false;
-        string n = sr.gameObject.name.ToLowerInvariant();
-        return n.Contains("lower");
+        bool inside = false;
+        int j = polygon.Count - 1;
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            Vector2 pi = polygon[i];
+            Vector2 pj = polygon[j];
+            bool intersects = ((pi.y > p.y) != (pj.y > p.y)) &&
+                              (p.x < ((pj.x - pi.x) * (p.y - pi.y) / Mathf.Max(0.000001f, (pj.y - pi.y)) + pi.x));
+            if (intersects) inside = !inside;
+            j = i;
+        }
+        return inside;
     }
 
     bool TryGetCombinedBounds(SpriteRenderer[] renderers, out Bounds bounds)
