@@ -27,8 +27,8 @@ public class TreeHoverSelector : MonoBehaviour
     public float fallbackTileWorldSize = 1f;
     public float selectorPadding = 1.08f;
     public bool includeInactiveTrees;
-    [Range(0f, 0.8f)] public float treeInteractMinYNormalized = 0.12f;
-    [Range(0.2f, 1f)] public float treeInteractMaxYNormalized = 0.88f;
+    [Range(0f, 0.8f)] public float treeInteractMinYNormalized = 0.45f;
+    [Range(0.2f, 1f)] public float treeInteractMaxYNormalized = 0.98f;
 
     [Header("Rendering")]
     public int sortingOrderBoost = 300;
@@ -141,6 +141,8 @@ public class TreeHoverSelector : MonoBehaviour
     private SpriteRenderer selectorRenderer;
     private Transform selectorTransform;
     private HarvestEntry activeHoveredTarget;
+    private Bounds activeHoveredHitBounds;
+    private bool hasActiveHoveredHitBounds;
 
     private Sprite cachedWoodSprite;
     private Sprite cachedStoneSprite;
@@ -170,6 +172,7 @@ public class TreeHoverSelector : MonoBehaviour
         StopAllSquashRoutines();
         SetSelectorVisible(false);
         activeHoveredTarget = null;
+        hasActiveHoveredHitBounds = false;
     }
 
     void OnDestroy()
@@ -212,6 +215,7 @@ public class TreeHoverSelector : MonoBehaviour
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
+            hasActiveHoveredHitBounds = false;
             return;
         }
 
@@ -219,6 +223,7 @@ public class TreeHoverSelector : MonoBehaviour
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
+            hasActiveHoveredHitBounds = false;
             return;
         }
 
@@ -226,13 +231,15 @@ public class TreeHoverSelector : MonoBehaviour
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
+            hasActiveHoveredHitBounds = false;
             return;
         }
 
-        if (!TryGetHoveredTarget(mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds))
+        if (!TryGetHoveredTarget(mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds, out Bounds hoveredHitBounds))
         {
             SetSelectorVisible(false);
             activeHoveredTarget = null;
+            hasActiveHoveredHitBounds = false;
             return;
         }
 
@@ -245,6 +252,8 @@ public class TreeHoverSelector : MonoBehaviour
 
         RenderSelector(hovered, hoveredBounds);
         activeHoveredTarget = hovered;
+        activeHoveredHitBounds = hoveredHitBounds;
+        hasActiveHoveredHitBounds = true;
     }
 
     void EnsureSelectorObject()
@@ -309,6 +318,8 @@ public class TreeHoverSelector : MonoBehaviour
         if (!registerPickaxeHits) return;
         if (selectorRenderer == null || !selectorRenderer.enabled) return;
         if (activeHoveredTarget == null || activeHoveredTarget.root == null) return;
+        if (!hasActiveHoveredHitBounds) return;
+        if (!IsMouseInsideBounds(activeHoveredHitBounds)) return;
 
         if (!ApplyPickaxeDamageToTarget(activeHoveredTarget))
         {
@@ -316,6 +327,14 @@ public class TreeHoverSelector : MonoBehaviour
         }
 
         StartTargetSquash(activeHoveredTarget);
+    }
+
+    bool IsMouseInsideBounds(Bounds bounds)
+    {
+        if (!TryGetMouseWorldPoint(out Vector2 mouseWorld)) return false;
+        Vector3 probe = new Vector3(mouseWorld.x, mouseWorld.y, 0f);
+        return probe.x >= bounds.min.x && probe.x <= bounds.max.x &&
+               probe.y >= bounds.min.y && probe.y <= bounds.max.y;
     }
 
     void StartTargetSquash(HarvestEntry target)
@@ -614,10 +633,11 @@ public class TreeHoverSelector : MonoBehaviour
         return string.Equals(kind, "Tree", StringComparison.OrdinalIgnoreCase);
     }
 
-    bool TryGetHoveredTarget(Vector2 mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds)
+    bool TryGetHoveredTarget(Vector2 mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds, out Bounds hoveredHitBounds)
     {
         hovered = null;
         hoveredBounds = default;
+        hoveredHitBounds = default;
         float bestDistance = float.MaxValue;
 
         Vector3 probe = new Vector3(mouseWorld.x, mouseWorld.y, 0f);
@@ -627,7 +647,8 @@ public class TreeHoverSelector : MonoBehaviour
             if (entry == null || entry.root == null) continue;
             if (!entry.root.gameObject.activeInHierarchy && !includeInactiveTrees) continue;
 
-            if (!TryGetInteractionBounds(entry, out Bounds b)) continue;
+            if (!TryGetHoverBounds(entry, out Bounds b)) continue;
+            if (!TryGetInteractionBounds(entry, out Bounds hitBounds)) continue;
 
             bool contains = probe.x >= b.min.x && probe.x <= b.max.x && probe.y >= b.min.y && probe.y <= b.max.y;
             if (!contains) continue;
@@ -638,10 +659,24 @@ public class TreeHoverSelector : MonoBehaviour
                 bestDistance = centerDist;
                 hovered = entry;
                 hoveredBounds = b;
+                hoveredHitBounds = hitBounds;
             }
         }
 
         return hovered != null;
+    }
+
+    bool TryGetHoverBounds(HarvestEntry entry, out Bounds bounds)
+    {
+        bounds = default;
+        if (entry == null || entry.renderers == null) return false;
+
+        if (entry.kind == HarvestKind.Tree)
+        {
+            return TryGetCombinedBounds(entry.renderers, false, out bounds);
+        }
+
+        return TryGetCombinedBounds(entry.renderers, out bounds);
     }
 
     bool TryGetInteractionBounds(HarvestEntry entry, out Bounds bounds)
