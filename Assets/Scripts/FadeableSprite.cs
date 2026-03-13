@@ -60,11 +60,15 @@ public class FadeableSprite : MonoBehaviour
 
     public Bounds GetBounds()
     {
-        if (TryGetColliderOcclusionBounds(out Bounds colliderBounds))
+        if (TryGetOcclusionBounds(out Bounds occlusionBounds))
         {
-            return colliderBounds;
+            return occlusionBounds;
         }
+        return GetVisualBounds();
+    }
 
+    public Bounds GetVisualBounds()
+    {
         if (renderers == null || renderers.Length == 0)
         {
             CacheRenderers();
@@ -118,7 +122,7 @@ public class FadeableSprite : MonoBehaviour
         return b;
     }
 
-    private bool TryGetColliderOcclusionBounds(out Bounds b)
+    public bool TryGetOcclusionBounds(out Bounds b)
     {
         b = default;
         if (GetComponent<UseColliderOcclusionBounds>() == null) return false;

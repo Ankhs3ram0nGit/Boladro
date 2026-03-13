@@ -34,16 +34,25 @@ public class PlayerOcclusionFader : MonoBehaviour
             FadeableSprite f = fadeables[i];
             if (f == null) continue;
 
-            Bounds b = f.GetBounds();
-            float minX = b.min.x - checkRadius;
-            float maxX = b.max.x + checkRadius;
-            float minY = b.min.y - checkRadius;
-            float maxY = b.max.y + checkRadius;
+            Bounds visualBounds = f.GetVisualBounds();
+            float minX = visualBounds.min.x - checkRadius;
+            float maxX = visualBounds.max.x + checkRadius;
+            float minY = visualBounds.min.y - checkRadius;
+            float maxY = visualBounds.max.y + checkRadius;
             bool within = feet.x >= minX && feet.x <= maxX && feet.y >= minY && feet.y <= maxY;
+
+            float fadeLineY = visualBounds.min.y;
+            if (f.TryGetOcclusionBounds(out Bounds occlusionBounds))
+            {
+                // For houses/large props with foot colliders, this line defines
+                // where "behind" starts while still using full visual bounds for coverage.
+                fadeLineY = occlusionBounds.max.y;
+            }
+
             int id = f.GetInstanceID();
             bool currentlyFaded = isFadedById.TryGetValue(id, out bool stored) && stored;
             float threshold = currentlyFaded ? fadeInBehindMargin : fadeOutBehindMargin;
-            bool behind = feet.y > b.min.y + threshold;
+            bool behind = feet.y > fadeLineY + threshold;
 
             if (within && behind)
             {
