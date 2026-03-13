@@ -27,6 +27,7 @@ public class TreeHoverSelector : MonoBehaviour
     public float fallbackTileWorldSize = 1f;
     public float selectorPadding = 1.08f;
     public bool includeInactiveTrees;
+    [Range(0f, 0.5f)] public float treeIgnoreBottomPortion = 0.12f;
 
     [Header("Rendering")]
     public int sortingOrderBoost = 300;
@@ -649,18 +650,30 @@ public class TreeHoverSelector : MonoBehaviour
 
         if (entry.kind == HarvestKind.Tree)
         {
-            if (TryGetCombinedBoundsFiltered(entry.renderers, IsTreeUpperRenderer, out bounds))
+            if (TryGetCombinedBoundsFiltered(entry.renderers, sr => !IsShadowRenderer(sr), out bounds))
             {
-                return true;
-            }
-            if (TryGetCombinedBoundsFiltered(entry.renderers, sr => !IsTreeLowerRenderer(sr) && !IsShadowRenderer(sr), out bounds))
-            {
+                bounds = TrimBoundsBottomPortion(bounds, treeIgnoreBottomPortion);
                 return true;
             }
             return false;
         }
 
         return TryGetCombinedBounds(entry.renderers, out bounds);
+    }
+
+    Bounds TrimBoundsBottomPortion(Bounds source, float ignoreBottomPortion)
+    {
+        float cut = Mathf.Clamp(ignoreBottomPortion, 0f, 0.5f);
+        if (cut <= 0.0001f) return source;
+
+        float remove = source.size.y * cut;
+        float h = Mathf.Max(0.0001f, source.size.y - remove);
+        float minY = source.min.y + remove;
+        float centerY = minY + (h * 0.5f);
+
+        return new Bounds(
+            new Vector3(source.center.x, centerY, source.center.z),
+            new Vector3(source.size.x, h, source.size.z));
     }
 
     bool TryGetCombinedBoundsFiltered(SpriteRenderer[] renderers, Func<SpriteRenderer, bool> includePredicate, out Bounds bounds)
