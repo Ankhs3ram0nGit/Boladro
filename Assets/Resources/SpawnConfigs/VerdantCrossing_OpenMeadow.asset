@@ -1,0 +1,64 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bb333f3547dd9344d813a782821b9c4a, type: 3}
+  m_Name: VerdantCrossing_OpenMeadow
+  m_EditorClassIdentifier: 
+  areaName: Zone - Verdant Crossing: Open Meadow
+  baseEncounterRate: 0.1
+  maxActiveCreatures: 8
+  respawnCooldownSeconds: 3
+  mainPool:
+  - creatureID: whelpling
+    weight: 60
+    levelMin: 2
+    levelMax: 5
+    rarityTier: 0
+    nightOnly: 0
+    dayOnly: 0
+    levelVarianceBonus: 0
+  - creatureID: meadow_hopper
+    weight: 40
+    levelMin: 1
+    levelMax: 1
+    rarityTier: 0
+    nightOnly: 0
+    dayOnly: 0
+    levelVarianceBonus: 0
+  - creatureID: leaf_sprite
+    weight: 30
+    levelMin: 1
+    levelMax: 1
+    rarityTier: 0
+    nightOnly: 0
+    dayOnly: 0
+    levelVarianceBonus: 0
+  rarePool:
+  - creatureID: ashcub
+    weight: 50
+    levelMin: 5
+    levelMax: 8
+    rarityTier: 4
+    nightOnly: 0
+    dayOnly: 0
+    levelVarianceBonus: 0
+  - creatureID: strikeling
+    weight: 50
+    levelMin: 5
+    levelMax: 8
+    rarityTier: 4
+    nightOnly: 0
+    dayOnly: 0
+    levelVarianceBonus: 0
+  rareEventChance: 0.02
+  allowDaySpawns: 1
+  allowNightSpawns: 1
+  weatherOverride: {fileID: 0}

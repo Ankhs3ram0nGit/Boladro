@@ -1,0 +1,2691 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
+public class BattleSystem : MonoBehaviour
+{
+    public static bool IsEngagedBattleActive { get; private set; }
+
+    public float engageRadius = 5f;
+    [Tooltip("Hard cap for nearest-creature search if no target is found in normal engage range.")]
+    public float maxEngageSearchRadius = 30f;
+    public GameObject battleRoot;
+    public Text messageText;
+
+    public Text playerNameText;
+    public Text playerLevelText;
+    public Text playerTypesText;
+    public Text playerHpText;
+    public Image playerHpBg;
+    public Image playerHpFill;
+
+    public Text enemyNameText;
+    public Text enemyLevelText;
+    public Text enemyTypesText;
+    public Text enemyHpText;
+    public Image enemyHpBg;
+    public Image enemyHpFill;
+
+    public Button attackButton;
+    public Button swapButton;
+    public Button captureButton;
+    public Button runButton;
+
+    public GameObject movePanel;
+    public Button[] moveButtons = new Button[4];
+    public Text[] moveTexts = new Text[4];
+
+    public Texture2D barBgTexture;
+    public Texture2D barFillTexture;
+    public Texture2D bottomFrameTexture;
+    public Sprite battleBackgroundSprite;
+    public Texture2D battleBackgroundTexture;
+    public Texture2D buttonNormalTexture;
+    public Texture2D buttonPressedTexture;
+    public Texture2D buttonHighlightTexture;
+    public float battleUiZoom = 1f;
+    public float actionNarrationDelay = 1.25f;
+    public float opponentTurnDelay = 1.0f;
+    public float actionPhaseDelay = 0.45f;
+    [Tooltip("Failsafe radius used when standard engage search finds no valid target.")]
+    public float fallbackEngageRadius = 10f;
+    [Tooltip("Show live debug panel for E-to-engage diagnostics.")]
+    public bool showEngageDebug = false;
+    public Vector2 engageDebugPanelPosition = new Vector2(16f, 160f);
+    public Vector2 engageDebugPanelSize = new Vector2(560f, 190f);
+
+    private PlayerMover playerMover;
+    private PlayerHealth playerHealth;
+    private WildCreatureAI currentEnemyAI;
+    private CreatureCombatant playerCreature;
+    private CreatureCombatant enemyCreature;
+    private GameObject hudRoot;
+    private GameObject actionMenu;
+    private RectTransform arenaPanel;
+    private RectTransform uiPanel;
+    private Image playerSpriteImage;
+    private Image enemySpriteImage;
+    private Image playerShadowImage;
+    private Image enemyShadowImage;
+    private Image battleBackgroundImage;
+    private Button backButton;
+    private Image bottomFrameImage;
+    private Font cachedDefaultFont;
+    private readonly Dictionary<string, Sprite> creatureSpriteCache = new Dictionary<string, Sprite>();
+
+    private bool inBattle;
+    private bool waitingForPlayerMove;
+    private bool hudWasHiddenForBattle;
+    private string engageDebugMessage = "Engage debug ready.";
+    private int engageDebugPressCount;
+    private int engageDebugNearbyCount;
+    private int engageDebugAliveCount;
+    private int engageDebugInBattleCount;
+    private float engageDebugNearestDistance = -1f;
+    private bool runtimeLayoutInitialized;
+    private Vector2Int lastLayoutScreenSize;
+    private bool turnResolutionInProgress;
+    private readonly HashSet<Image> activeAttackAnimations = new HashSet<Image>();
+    private Sprite shadowEllipseSprite;
+    private Vector3 playerSpriteBaseLocalPos;
+    private Vector3 enemySpriteBaseLocalPos;
+    private Vector3 playerSpriteBaseLocalScale = Vector3.one;
+    private Vector3 enemySpriteBaseLocalScale = Vector3.one;
+    private static readonly Color HpGreen = new Color(0.20f, 0.82f, 0.24f, 1f);
+    private static readonly Color HpLightGreen = new Color(0.56f, 0.90f, 0.34f, 1f);
+    private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
+    private static readonly Color HpRed = new Color(0.90f, 0.18f, 0.18f, 1f);
+
+    void OnEnable()
+    {
+        // Recover from stale play-mode state when domain reload is disabled.
+        inBattle = false;
+        waitingForPlayerMove = false;
+        turnResolutionInProgress = false;
+        IsEngagedBattleActive = false;
+    }
+
+    void OnDisable()
+    {
+        IsEngagedBattleActive = false;
+    }
+
+    void Start()
+    {
+        if (engageRadius < 0.25f) engageRadius = 5f;
+        inBattle = false;
+        waitingForPlayerMove = false;
+        turnResolutionInProgress = false;
+        runtimeLayoutInitialized = false;
+        lastLayoutScreenSize = Vector2Int.zero;
+        hudWasHiddenForBattle = false;
+        IsEngagedBattleActive = false;
+        showEngageDebug = false;
+
+        playerMover = GetComponent<PlayerMover>();
+        playerHealth = GetComponent<PlayerHealth>();
+
+        AutoFindUI();
+
+        if (battleRoot != null) battleRoot.SetActive(false);
+        if (movePanel != null) movePanel.SetActive(false);
+
+        ApplyEncounterLayout();
+        HookButtons();
+        ApplyBarSprites();
+        EnsureButtonLabels();
+        ApplyButtonSkins();
+    }
+
+    void AutoFindUI()
+    {
+        if (battleRoot == null)
+        {
+            GameObject root = GameObject.Find("BattleUI");
+            if (root != null) battleRoot = root;
+        }
+
+        Transform rootTf = battleRoot != null ? battleRoot.transform : null;
+        if (rootTf == null) return;
+
+        arenaPanel = FindRect(rootTf, "ArenaPanel");
+        uiPanel = FindRect(rootTf, "UIPanel");
+        if (hudRoot == null)
+        {
+            Transform hud = rootTf.parent != null ? rootTf.parent.Find("HUD") : null;
+            if (hud != null) hudRoot = hud.gameObject;
+        }
+
+        if (messageText == null)
+        {
+            Transform t = rootTf.Find("MessageText");
+            if (t != null) messageText = t.GetComponent<Text>();
+        }
+
+        playerNameText = playerNameText ?? FindText(rootTf, "UIPanel/PlayerBar/PlayerName");
+        playerTypesText = playerTypesText ?? FindText(rootTf, "UIPanel/PlayerBar/PlayerTypes");
+        playerLevelText = playerLevelText ?? FindText(rootTf, "UIPanel/PlayerBar/PlayerLevel");
+        playerHpText = playerHpText ?? FindText(rootTf, "UIPanel/PlayerBar/PlayerHpText");
+        playerHpBg = playerHpBg ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerHpBG");
+        playerHpFill = playerHpFill ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerHpBG/PlayerHpFill");
+
+        enemyNameText = enemyNameText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyName");
+        enemyTypesText = enemyTypesText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyTypes");
+        enemyLevelText = enemyLevelText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyLevel");
+        enemyHpText = enemyHpText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyHpText");
+        enemyHpText = enemyHpText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyHpBG/EnemyHpText");
+        enemyHpBg = enemyHpBg ?? FindImage(rootTf, "UIPanel/EnemyBar/EnemyHpBG");
+        enemyHpFill = enemyHpFill ?? FindImage(rootTf, "UIPanel/EnemyBar/EnemyHpBG/EnemyHpFill");
+        playerSpriteImage = playerSpriteImage ?? FindImage(rootTf, "ArenaPanel/PlayerCreatureImage");
+        enemySpriteImage = enemySpriteImage ?? FindImage(rootTf, "ArenaPanel/EnemyCreatureImage");
+
+        attackButton = attackButton ?? FindButton(rootTf, "UIPanel/ActionMenu/AttackButton");
+        swapButton = swapButton ?? FindButton(rootTf, "UIPanel/ActionMenu/SwapButton");
+        captureButton = captureButton ?? FindButton(rootTf, "UIPanel/ActionMenu/CaptureButton");
+        runButton = runButton ?? FindButton(rootTf, "UIPanel/ActionMenu/RunButton");
+
+        if (movePanel == null)
+        {
+            Transform t = rootTf.Find("UIPanel/MovePanel");
+            if (t != null) movePanel = t.gameObject;
+        }
+        if (actionMenu == null)
+        {
+            Transform t = rootTf.Find("UIPanel/ActionMenu");
+            if (t != null) actionMenu = t.gameObject;
+        }
+
+        if (moveButtons == null || moveButtons.Length != 4) moveButtons = new Button[4];
+        if (moveTexts == null || moveTexts.Length != 4) moveTexts = new Text[4];
+
+        moveButtons[0] = moveButtons[0] ?? FindButton(rootTf, "UIPanel/MovePanel/MoveButton1");
+        moveButtons[1] = moveButtons[1] ?? FindButton(rootTf, "UIPanel/MovePanel/MoveButton2");
+        moveButtons[2] = moveButtons[2] ?? FindButton(rootTf, "UIPanel/MovePanel/MoveButton3");
+        moveButtons[3] = moveButtons[3] ?? FindButton(rootTf, "UIPanel/MovePanel/MoveButton4");
+
+        moveTexts[0] = moveTexts[0] ?? FindText(rootTf, "UIPanel/MovePanel/MoveButton1/Text");
+        moveTexts[1] = moveTexts[1] ?? FindText(rootTf, "UIPanel/MovePanel/MoveButton2/Text");
+        moveTexts[2] = moveTexts[2] ?? FindText(rootTf, "UIPanel/MovePanel/MoveButton3/Text");
+        moveTexts[3] = moveTexts[3] ?? FindText(rootTf, "UIPanel/MovePanel/MoveButton4/Text");
+    }
+
+    Text FindText(Transform root, string path)
+    {
+        Transform t = root.Find(path);
+        return t != null ? t.GetComponent<Text>() : null;
+    }
+
+    Image FindImage(Transform root, string path)
+    {
+        Transform t = root.Find(path);
+        return t != null ? t.GetComponent<Image>() : null;
+    }
+
+    Button FindButton(Transform root, string path)
+    {
+        Transform t = root.Find(path);
+        return t != null ? t.GetComponent<Button>() : null;
+    }
+
+    RectTransform FindRect(Transform root, string path)
+    {
+        Transform t = root.Find(path);
+        return t != null ? t.GetComponent<RectTransform>() : null;
+    }
+
+    void Update()
+    {
+        RecoverFromStaleBattleState();
+
+        if (!inBattle)
+        {
+            Keyboard kb = Keyboard.current;
+            if (kb != null && kb.eKey.wasPressedThisFrame)
+            {
+                TryStartBattle();
+            }
+            return;
+        }
+
+        EnsureBattleRuntimeState();
+    }
+
+    public bool TryStartBattleFromInput()
+    {
+        engageDebugPressCount++;
+        SetEngageDebug("E pressed. Trying to engage.");
+        RecoverFromStaleBattleState(force: true);
+        if (inBattle)
+        {
+            SetEngageDebug("Blocked: already marked as in battle.");
+            return false;
+        }
+        return TryStartBattleInternal();
+    }
+
+    void HookButtons()
+    {
+        if (attackButton != null)
+        {
+            attackButton.onClick.RemoveAllListeners();
+            attackButton.onClick.AddListener(OpenMovePanel);
+        }
+        if (swapButton != null)
+        {
+            swapButton.onClick.RemoveAllListeners();
+            swapButton.onClick.AddListener(() => SetMessage("Swap not implemented yet."));
+        }
+        if (captureButton != null)
+        {
+            captureButton.onClick.RemoveAllListeners();
+            captureButton.onClick.AddListener(() => SetMessage("Capture not implemented yet."));
+        }
+        if (runButton != null)
+        {
+            runButton.onClick.RemoveAllListeners();
+            runButton.onClick.AddListener(TryRun);
+        }
+
+        for (int i = 0; i < moveButtons.Length; i++)
+        {
+            int idx = i;
+            if (moveButtons[i] != null)
+            {
+                moveButtons[i].onClick.RemoveAllListeners();
+                moveButtons[i].onClick.AddListener(() => SelectMove(idx));
+            }
+        }
+    }
+
+    void EnsureButtonLabels()
+    {
+        ConfigureButtonLabel(attackButton, "ATTACK");
+        ConfigureButtonLabel(swapButton, "SWAP");
+        ConfigureButtonLabel(captureButton, "CAPTURE");
+        ConfigureButtonLabel(runButton, "RUN");
+    }
+
+    void ConfigureButtonLabel(Button button, string text)
+    {
+        if (button == null) return;
+        Text[] labels = button.GetComponentsInChildren<Text>(true);
+        if (labels == null || labels.Length == 0)
+        {
+            GameObject textGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            textGo.transform.SetParent(button.transform, false);
+            labels = new[] { textGo.GetComponent<Text>() };
+        }
+
+        for (int i = 0; i < labels.Length; i++)
+        {
+            Text label = labels[i];
+            if (label == null) continue;
+            if (label.font == null) label.font = GetDefaultUIFont();
+            label.text = text;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.color = Color.white;
+            label.fontSize = 42;
+            label.fontStyle = FontStyle.Bold;
+            label.raycastTarget = false;
+            Outline o = label.GetComponent<Outline>();
+            if (o == null) o = label.gameObject.AddComponent<Outline>();
+            o.effectColor = new Color(0f, 0f, 0f, 0.95f);
+            o.effectDistance = new Vector2(2f, -2f);
+
+            RectTransform rt = label.rectTransform;
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            rt.anchoredPosition = Vector2.zero;
+        }
+    }
+
+    void ApplyButtonSkins()
+    {
+#if UNITY_EDITOR
+        buttonNormalTexture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_1.png");
+        buttonHighlightTexture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_2.png");
+        buttonPressedTexture = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_3.png");
+#endif
+        if (buttonNormalTexture == null) buttonNormalTexture = Resources.Load<Texture2D>("UI/BattleButtonNormal");
+        if (buttonPressedTexture == null) buttonPressedTexture = Resources.Load<Texture2D>("UI/BattleButtonPressed");
+        if (buttonHighlightTexture == null) buttonHighlightTexture = Resources.Load<Texture2D>("UI/BattleButtonHighlight");
+
+        Sprite normal = CreateSprite(buttonNormalTexture);
+        Sprite pressed = CreateSprite(buttonPressedTexture);
+        Sprite highlighted = CreateSprite(buttonHighlightTexture != null ? buttonHighlightTexture : buttonNormalTexture);
+
+        ApplyButtonSkin(attackButton, normal, highlighted, pressed);
+        ApplyButtonSkin(swapButton, normal, highlighted, pressed);
+        ApplyButtonSkin(captureButton, normal, highlighted, pressed);
+        ApplyButtonSkin(runButton, normal, highlighted, pressed);
+
+        for (int i = 0; i < moveButtons.Length; i++)
+        {
+            ApplyButtonSkin(moveButtons[i], normal, highlighted, pressed);
+        }
+        ApplyButtonSkin(backButton, normal, highlighted, pressed);
+    }
+
+    Sprite CreateSprite(Texture2D tex)
+    {
+        if (tex == null) return null;
+        return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    void ApplyButtonSkin(Button button, Sprite normal, Sprite highlighted, Sprite pressed)
+    {
+        if (button == null) return;
+        Image image = button.GetComponent<Image>();
+        if (image == null) return;
+
+        if (normal != null)
+        {
+            image.sprite = normal;
+            image.type = Image.Type.Simple;
+            image.preserveAspect = false;
+            image.color = Color.white;
+        }
+
+        ColorBlock colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(1f, 1f, 1f, 0.95f);
+        colors.pressedColor = new Color(0.88f, 0.88f, 0.88f, 1f);
+        colors.selectedColor = Color.white;
+        colors.disabledColor = new Color(1f, 1f, 1f, 0.45f);
+        button.colors = colors;
+
+        SpriteState state = button.spriteState;
+        if (highlighted != null) state.highlightedSprite = highlighted;
+        if (pressed != null) state.pressedSprite = pressed;
+        button.spriteState = state;
+        button.transition = Selectable.Transition.SpriteSwap;
+    }
+
+    void ApplyBarSprites()
+    {
+        if (barBgTexture == null)
+        {
+            barBgTexture = Resources.Load<Texture2D>("UI/BattleBarBG");
+        }
+        if (barFillTexture == null)
+        {
+            barFillTexture = Resources.Load<Texture2D>("UI/BattleBarFill");
+        }
+
+        if (barBgTexture != null)
+        {
+            Sprite bg = Sprite.Create(barBgTexture, new Rect(0, 0, barBgTexture.width, barBgTexture.height), new Vector2(0.5f, 0.5f), 100f);
+            if (playerHpBg != null) playerHpBg.sprite = bg;
+            if (enemyHpBg != null) enemyHpBg.sprite = bg;
+        }
+
+        if (barFillTexture != null)
+        {
+            Sprite fill = Sprite.Create(barFillTexture, new Rect(0, 0, barFillTexture.width, barFillTexture.height), new Vector2(0.5f, 0.5f), 100f);
+            if (playerHpFill != null) playerHpFill.sprite = fill;
+            if (enemyHpFill != null) enemyHpFill.sprite = fill;
+
+            if (playerHpFill != null)
+            {
+                playerHpFill.type = Image.Type.Filled;
+                playerHpFill.fillMethod = Image.FillMethod.Horizontal;
+                playerHpFill.fillOrigin = 0;
+            }
+            if (enemyHpFill != null)
+            {
+                enemyHpFill.type = Image.Type.Filled;
+                enemyHpFill.fillMethod = Image.FillMethod.Horizontal;
+                enemyHpFill.fillOrigin = 0;
+            }
+        }
+    }
+
+    void TryStartBattle()
+    {
+        TryStartBattleInternal();
+    }
+
+    bool TryStartBattleInternal()
+    {
+        if (!inBattle)
+        {
+            IsEngagedBattleActive = false;
+        }
+
+        if (engageRadius < 0.25f) engageRadius = 5f;
+        if (fallbackEngageRadius < engageRadius) fallbackEngageRadius = Mathf.Max(engageRadius, 10f);
+        if (maxEngageSearchRadius < fallbackEngageRadius) maxEngageSearchRadius = Mathf.Max(12f, fallbackEngageRadius);
+        RefreshEngageDebugSnapshot(maxEngageSearchRadius);
+        ClearStaleWildBattleFlags();
+
+        currentEnemyAI = FindEngageTarget(engageRadius);
+        if (currentEnemyAI == null)
+        {
+            SetEngageDebug("No target in engageRadius. Trying fallback radius.");
+            currentEnemyAI = FindEngageTarget(fallbackEngageRadius);
+        }
+        if (currentEnemyAI == null)
+        {
+            // Failsafe: still allow engagement by selecting the nearest valid wild creature in a larger range.
+            SetEngageDebug("No target in fallback radius. Trying max search radius.");
+            currentEnemyAI = FindEngageTarget(maxEngageSearchRadius);
+        }
+        if (currentEnemyAI == null)
+        {
+            // Final fallback: nearest alive wild creature anywhere in scene.
+            SetEngageDebug("No target in max radius. Trying nearest alive wild globally.");
+            currentEnemyAI = FindNearestEngageableWildAnyDistance();
+        }
+        if (currentEnemyAI == null)
+        {
+            // Absolute fallback: build a temporary engageable target from any nearby creature object.
+            SetEngageDebug("No wild target found. Trying fallback from CreatureHealth.");
+            currentEnemyAI = FindOrCreateFallbackWildTarget();
+        }
+        if (currentEnemyAI == null)
+        {
+            SetEngageDebug("Engage failed: no valid target found.");
+            return false;
+        }
+
+        float dist = Vector2.Distance(transform.position, currentEnemyAI.transform.position);
+        SetEngageDebug("Engaging: " + currentEnemyAI.name + " at distance " + dist.ToString("0.00"));
+        StartBattle(currentEnemyAI);
+        return true;
+    }
+
+    void ClearStaleWildBattleFlags()
+    {
+        if (IsEngagedBattleActive) return;
+        WildCreatureAI[] all = FindObjectsByType<WildCreatureAI>(FindObjectsSortMode.None);
+        if (all == null || all.Length == 0) return;
+        for (int i = 0; i < all.Length; i++)
+        {
+            WildCreatureAI ai = all[i];
+            if (ai == null) continue;
+            if (!ai.gameObject.activeInHierarchy) continue;
+            if (ai.IsInBattle()) ai.ExitBattle();
+        }
+    }
+
+    WildCreatureAI FindNearestEngageableWildAnyDistance()
+    {
+        Vector2 pos = transform.position;
+        WildCreatureAI[] enemies = FindObjectsByType<WildCreatureAI>(FindObjectsSortMode.None);
+        if (enemies == null || enemies.Length == 0) return null;
+
+        WildCreatureAI closest = null;
+        float bestSqr = float.MaxValue;
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            WildCreatureAI e = enemies[i];
+            if (e == null) continue;
+            if (!e.gameObject.activeInHierarchy) continue;
+            if (!e.IsAlive()) continue;
+            if (e.IsInBattle()) continue;
+
+            float dSqr = ((Vector2)e.transform.position - pos).sqrMagnitude;
+            if (dSqr >= bestSqr) continue;
+            bestSqr = dSqr;
+            closest = e;
+        }
+        return closest;
+    }
+
+    WildCreatureAI FindEngageTarget(float radius)
+    {
+        float r = Mathf.Max(0.5f, radius);
+        float rSqr = r * r;
+        Vector2 pos = transform.position;
+        WildCreatureAI[] enemies = FindObjectsByType<WildCreatureAI>(FindObjectsSortMode.None);
+        if (enemies == null || enemies.Length == 0) return null;
+
+        WildCreatureAI closest = null;
+        float bestSqr = float.MaxValue;
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            WildCreatureAI e = enemies[i];
+            if (e == null) continue;
+            if (!e.gameObject.activeInHierarchy) continue;
+            if (!e.IsAlive()) continue;
+            if (e.IsInBattle())
+            {
+                if (!IsEngagedBattleActive)
+                {
+                    e.ExitBattle();
+                }
+                else
+                {
+                    continue;
+                }
+            }
+
+            float dSqr = ((Vector2)e.transform.position - pos).sqrMagnitude;
+            if (dSqr > rSqr) continue;
+            if (dSqr >= bestSqr) continue;
+
+            bestSqr = dSqr;
+            closest = e;
+        }
+
+        return closest;
+    }
+
+    void RecoverFromStaleBattleState(bool force = false)
+    {
+        if (!inBattle)
+        {
+            if (force) IsEngagedBattleActive = false;
+            return;
+        }
+
+        bool enemyValid = currentEnemyAI != null && currentEnemyAI.gameObject != null && currentEnemyAI.gameObject.activeInHierarchy;
+        // Keep battle alive as long as the engaged enemy is valid.
+        // UI visibility can lag a frame (or be toggled by layout scripts) and should not auto-cancel battle.
+        bool keepBattle = enemyValid && !force;
+        if (keepBattle) return;
+
+        // If battle state is set but battle UI is gone, recover so engagement input works again.
+        inBattle = false;
+        waitingForPlayerMove = false;
+        hudWasHiddenForBattle = false;
+        IsEngagedBattleActive = false;
+        currentEnemyAI = null;
+        enemyCreature = null;
+
+        if (battleRoot != null)
+        {
+            battleRoot.SetActive(false);
+        }
+        if (movePanel != null)
+        {
+            movePanel.SetActive(false);
+        }
+
+        if (playerMover != null && (playerHealth == null || playerHealth.currentHealth > 0))
+        {
+            playerMover.enabled = true;
+        }
+        SetEngageDebug("Recovered stale battle state.");
+    }
+
+    WildCreatureAI FindOrCreateFallbackWildTarget()
+    {
+        Vector2 pos = transform.position;
+        float best = float.MaxValue;
+        CreatureHealth bestHealth = null;
+
+        CreatureHealth[] all = FindObjectsByType<CreatureHealth>(FindObjectsSortMode.None);
+        for (int i = 0; i < all.Length; i++)
+        {
+            CreatureHealth ch = all[i];
+            if (ch == null) continue;
+            if (!ch.gameObject.activeInHierarchy) continue;
+            if (ch.currentHealth <= 0) continue;
+            if (ch.GetComponent<PlayerHealth>() != null) continue;
+            if (ch.GetComponent<Follower>() != null) continue;
+
+            float d = ((Vector2)ch.transform.position - pos).sqrMagnitude;
+            if (d >= best) continue;
+            best = d;
+            bestHealth = ch;
+        }
+
+        if (bestHealth == null) return null;
+
+        WildCreatureAI ai = bestHealth.GetComponent<WildCreatureAI>();
+        if (ai == null) ai = bestHealth.gameObject.AddComponent<WildCreatureAI>();
+        ai.ExitBattle();
+        return ai;
+    }
+
+    void RefreshEngageDebugSnapshot(float radius)
+    {
+        engageDebugNearbyCount = 0;
+        engageDebugAliveCount = 0;
+        engageDebugInBattleCount = 0;
+        engageDebugNearestDistance = -1f;
+
+        WildCreatureAI[] enemies = FindObjectsByType<WildCreatureAI>(FindObjectsSortMode.None);
+        if (enemies == null || enemies.Length == 0) return;
+
+        float r = Mathf.Max(0.5f, radius);
+        float rSqr = r * r;
+        Vector2 pos = transform.position;
+        float bestSqr = float.MaxValue;
+
+        for (int i = 0; i < enemies.Length; i++)
+        {
+            WildCreatureAI e = enemies[i];
+            if (e == null) continue;
+            if (!e.gameObject.activeInHierarchy) continue;
+
+            engageDebugNearbyCount++;
+            if (e.IsAlive()) engageDebugAliveCount++;
+            if (e.IsInBattle()) engageDebugInBattleCount++;
+
+            float dSqr = ((Vector2)e.transform.position - pos).sqrMagnitude;
+            if (dSqr <= rSqr && dSqr < bestSqr)
+            {
+                bestSqr = dSqr;
+            }
+        }
+
+        if (bestSqr < float.MaxValue)
+        {
+            engageDebugNearestDistance = Mathf.Sqrt(bestSqr);
+        }
+    }
+
+    void SetEngageDebug(string msg)
+    {
+        engageDebugMessage = msg;
+        Debug.Log("[Battle Engage Debug] " + msg);
+    }
+
+    void OnGUI()
+    {
+        // Debug panel intentionally disabled for polish builds.
+        showEngageDebug = false;
+        if (!showEngageDebug) return;
+
+        Rect rect = new Rect(
+            engageDebugPanelPosition.x,
+            engageDebugPanelPosition.y,
+            engageDebugPanelSize.x,
+            engageDebugPanelSize.y
+        );
+        GUI.color = new Color(0f, 0f, 0f, 0.72f);
+        GUI.Box(rect, GUIContent.none);
+        GUI.color = Color.white;
+
+        GUILayout.BeginArea(new Rect(rect.x + 8f, rect.y + 8f, rect.width - 16f, rect.height - 16f));
+        GUILayout.Label("Battle Engage Debug");
+        GUILayout.Label("Presses: " + engageDebugPressCount);
+        GUILayout.Label("InBattle: " + inBattle + " | GlobalActive: " + IsEngagedBattleActive);
+        if (battleRoot == null)
+        {
+            GUILayout.Label("BattleRoot: null");
+        }
+        else
+        {
+            string parentState = "none";
+            Transform p = battleRoot.transform.parent;
+            if (p != null)
+            {
+                parentState = p.name + " self:" + p.gameObject.activeSelf + " inHierarchy:" + p.gameObject.activeInHierarchy;
+            }
+            GUILayout.Label("BattleRoot: self:" + battleRoot.activeSelf + " inHierarchy:" + battleRoot.activeInHierarchy + " parent: " + parentState);
+        }
+        GUILayout.Label("CurrentEnemy: " + (currentEnemyAI == null ? "null" : currentEnemyAI.name));
+        GUILayout.Label("WaitingForMove: " + waitingForPlayerMove + " | AttackInteractable: " + (attackButton != null && attackButton.interactable));
+        GUILayout.Label("Wilds Active: " + engageDebugNearbyCount + " | Alive: " + engageDebugAliveCount + " | Flagged InBattle: " + engageDebugInBattleCount);
+        GUILayout.Label("Nearest within max search: " + (engageDebugNearestDistance < 0f ? "none" : engageDebugNearestDistance.ToString("0.00")));
+        GUILayout.Label("Message: " + engageDebugMessage);
+        GUILayout.EndArea();
+    }
+
+    public void StartBattle(WildCreatureAI enemyAI)
+    {
+        if (inBattle) return;
+        currentEnemyAI = enemyAI;
+
+        inBattle = true;
+        IsEngagedBattleActive = true;
+        waitingForPlayerMove = true;
+        hudWasHiddenForBattle = false;
+        turnResolutionInProgress = false;
+        runtimeLayoutInitialized = false;
+        lastLayoutScreenSize = Vector2Int.zero;
+        ApplyEncounterLayout();
+        HookButtons();
+        EnsureButtonLabels();
+
+        if (playerMover != null) playerMover.enabled = false;
+        if (enemyAI != null)
+        {
+            enemyAI.EnterBattle();
+            enemyAI.ForceStop();
+        }
+
+        playerCreature = ResolvePlayerCombatant();
+        if (playerCreature != null)
+        {
+            string playerId = ResolveCreatureID(playerCreature.gameObject, playerCreature);
+            ConfigureCombatantByCreatureID(playerCreature, playerId, Mathf.Max(1, playerCreature.level), true);
+        }
+        else
+        {
+            Debug.LogWarning("BattleSystem: Could not resolve a player creature combatant. Attack menu will be disabled.");
+        }
+
+        enemyCreature = ResolveEnemyCombatant(enemyAI);
+        if (enemyCreature != null)
+        {
+            string enemyId = ResolveCreatureID(enemyAI != null ? enemyAI.gameObject : enemyCreature.gameObject, enemyCreature);
+            int enemyLevel = Mathf.Max(1, enemyCreature.level);
+            CreatureHealth enemyHealth = enemyAI != null ? enemyAI.GetComponent<CreatureHealth>() : null;
+            if (enemyHealth != null && enemyHealth.level > 0) enemyLevel = enemyHealth.level;
+
+            if (enemyAI != null)
+            {
+                WorldSpawnMarker marker = enemyAI.GetComponent<WorldSpawnMarker>();
+                if (marker == null) marker = enemyAI.gameObject.AddComponent<WorldSpawnMarker>();
+                if (string.IsNullOrWhiteSpace(marker.creatureID)) marker.creatureID = enemyId;
+                marker.level = enemyLevel;
+            }
+
+            ConfigureCombatantByCreatureID(enemyCreature, enemyId, enemyLevel, true);
+            if (enemyHealth != null && enemyHealth.maxHealth > 0)
+            {
+                float hpRatio = Mathf.Clamp01((float)enemyHealth.currentHealth / enemyHealth.maxHealth);
+                enemyCreature.currentHP = Mathf.Clamp(Mathf.RoundToInt(enemyCreature.maxHP * hpRatio), 1, enemyCreature.maxHP);
+            }
+        }
+
+        if (battleRoot != null) battleRoot.SetActive(true);
+        if (movePanel != null) movePanel.SetActive(false);
+        SetActionMenuVisible(true);
+        SetBackButtonVisible(false);
+        if (hudRoot != null && battleRoot != null && !battleRoot.transform.IsChildOf(hudRoot.transform))
+        {
+            hudRoot.SetActive(false);
+            hudWasHiddenForBattle = true;
+        }
+
+        UpdateCreatureSprites();
+        UpdateUI();
+        string enemyName = enemyCreature != null ? enemyCreature.creatureName : "Creature";
+        SetMessage("A wild " + enemyName + " appears!");
+        RefreshTurnInputState();
+    }
+
+    CreatureCombatant ResolvePlayerCombatant()
+    {
+        if (IsValidCombatant(playerCreature)) return playerCreature;
+
+        GameObject frog = GameObject.Find("Frog");
+        if (frog != null)
+        {
+            CreatureCombatant frogCombatant = frog.GetComponent<CreatureCombatant>();
+            if (frogCombatant == null) frogCombatant = frog.AddComponent<CreatureCombatant>();
+            if (frogCombatant != null) return frogCombatant;
+        }
+
+        Follower[] followers = FindObjectsByType<Follower>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < followers.Length; i++)
+        {
+            Follower follower = followers[i];
+            if (follower == null || follower.gameObject == null) continue;
+            if (!follower.gameObject.activeInHierarchy) continue;
+            CreatureCombatant c = follower.GetComponent<CreatureCombatant>();
+            if (c != null) return c;
+        }
+
+        if (playerMover != null)
+        {
+            CreatureCombatant self = playerMover.GetComponent<CreatureCombatant>();
+            if (self == null) self = playerMover.gameObject.AddComponent<CreatureCombatant>();
+            return self;
+        }
+
+        return null;
+    }
+
+    CreatureCombatant ResolveEnemyCombatant(WildCreatureAI enemyAI)
+    {
+        if (enemyAI != null)
+        {
+            CreatureCombatant c = enemyAI.GetComponent<CreatureCombatant>();
+            if (c == null) c = enemyAI.gameObject.AddComponent<CreatureCombatant>();
+            return c;
+        }
+
+        return IsValidCombatant(enemyCreature) ? enemyCreature : null;
+    }
+
+    static bool IsValidCombatant(CreatureCombatant combatant)
+    {
+        return combatant != null && combatant.gameObject != null;
+    }
+
+    public void StartEncounterFromSpawn(CreatureEncounterData data)
+    {
+        if (data == null || inBattle) return;
+
+        WildCreatureAI spawned = CreateEncounterEnemy(data);
+        if (spawned == null)
+        {
+            if (SpawnManager.HasInstance)
+            {
+                // Encounter was consumed but failed to instantiate; release spawn slot.
+                SpawnManager.Instance.NotifyBattleResolved();
+            }
+            Debug.LogWarning("Spawn encounter failed: no usable WildCreatureAI template found.");
+            return;
+        }
+
+        currentEnemyAI = spawned;
+        StartBattle(currentEnemyAI);
+    }
+
+    WildCreatureAI CreateEncounterEnemy(CreatureEncounterData data)
+    {
+        WildCreatureAI template = FindEncounterTemplate();
+        if (template == null) return null;
+
+        Vector3 spawnPos = transform.position + new Vector3(1.5f, 0f, 0f);
+        WildCreatureAI enemy = Instantiate(template, spawnPos, Quaternion.identity);
+        enemy.gameObject.SetActive(true);
+        enemy.name = "EncounterEnemy_" + data.creatureID;
+        if (enemy.GetComponent<EncounterSpawnMarker>() == null)
+        {
+            enemy.gameObject.AddComponent<EncounterSpawnMarker>();
+        }
+
+        CreatureCombatant cc = enemy.GetComponent<CreatureCombatant>();
+        if (cc == null) cc = enemy.gameObject.AddComponent<CreatureCombatant>();
+        ConfigureCombatantByCreatureID(cc, data.creatureID, Mathf.Max(1, data.resolvedLevel), true);
+
+        CreatureHealth ch = enemy.GetComponent<CreatureHealth>();
+        if (ch != null)
+        {
+            ch.level = Mathf.Max(1, data.resolvedLevel);
+        }
+
+        return enemy;
+    }
+
+    WildCreatureAI FindEncounterTemplate()
+    {
+        WildCreatureAI[] all = FindObjectsByType<WildCreatureAI>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        WildCreatureAI fallback = null;
+        for (int i = 0; i < all.Length; i++)
+        {
+            WildCreatureAI ai = all[i];
+            if (ai == null) continue;
+            if (ai.GetComponent<EncounterSpawnMarker>() != null) continue; // skip spawned encounter clones
+            if (fallback == null) fallback = ai;
+            if (ai.gameObject.activeInHierarchy) return ai;
+        }
+        return fallback;
+    }
+
+    void EndBattle(bool playerWon)
+    {
+        inBattle = false;
+        IsEngagedBattleActive = false;
+        waitingForPlayerMove = false;
+        turnResolutionInProgress = false;
+
+        if (battleRoot != null) battleRoot.SetActive(false);
+        if (movePanel != null) movePanel.SetActive(false);
+        SetActionMenuVisible(true);
+        SetBackButtonVisible(false);
+        if (hudRoot != null && hudWasHiddenForBattle) hudRoot.SetActive(true);
+        hudWasHiddenForBattle = false;
+
+        if (currentEnemyAI != null)
+        {
+            currentEnemyAI.ExitBattle();
+            bool spawnedEncounter = currentEnemyAI.GetComponent<EncounterSpawnMarker>() != null;
+            if (spawnedEncounter)
+            {
+                Destroy(currentEnemyAI.gameObject);
+            }
+            else if (playerWon)
+            {
+                currentEnemyAI.gameObject.SetActive(false);
+            }
+        }
+
+        if (playerMover != null && (playerHealth == null || playerHealth.currentHealth > 0))
+        {
+            playerMover.enabled = true;
+        }
+
+        if (SpawnManager.HasInstance)
+        {
+            SpawnManager.Instance.NotifyBattleResolved();
+        }
+
+        RefreshTurnInputState();
+    }
+
+    void OpenMovePanel()
+    {
+        if (!inBattle || !waitingForPlayerMove) return;
+        if (playerCreature == null)
+        {
+            playerCreature = ResolvePlayerCombatant();
+            if (playerCreature == null)
+            {
+                SetMessage("No active player creature found.");
+                RefreshTurnInputState();
+                return;
+            }
+        }
+        if (movePanel != null) movePanel.SetActive(true);
+        SetActionMenuVisible(false);
+        SetBackButtonVisible(true);
+        RefreshTurnInputState();
+
+        for (int i = 0; i < moveTexts.Length; i++)
+        {
+            int unlockLevel = 1 + i * 5;
+            bool unlocked = playerCreature.level >= unlockLevel;
+            Text liveText = moveTexts[i];
+            if (liveText == null && moveButtons[i] != null)
+            {
+                Transform labelTf = moveButtons[i].transform.Find("Text");
+                if (labelTf != null) liveText = labelTf.GetComponent<Text>();
+            }
+
+            if (liveText != null)
+            {
+                if (!unlocked)
+                {
+                    liveText.text = "Locked";
+                }
+                else
+                {
+                    bool hasAttack = playerCreature.attacks != null && i >= 0 && i < playerCreature.attacks.Count && playerCreature.attacks[i] != null;
+                    if (hasAttack)
+                    {
+                        AttackData atk = playerCreature.attacks[i];
+                        liveText.text = atk.name + "  " + atk.currentPP + "/" + atk.maxPP;
+                    }
+                    else
+                    {
+                        liveText.text = "---";
+                        unlocked = false;
+                    }
+                }
+                liveText.alignment = TextAnchor.MiddleCenter;
+                liveText.color = new Color(0.08f, 0.08f, 0.10f, 1f);
+            }
+            if (moveButtons[i] != null)
+            {
+                moveButtons[i].interactable = waitingForPlayerMove && unlocked;
+                UpdateButtonVisualState(moveButtons[i]);
+            }
+        }
+    }
+
+    void SelectMove(int index)
+    {
+        if (turnResolutionInProgress) return;
+        if (!waitingForPlayerMove || playerCreature == null || enemyCreature == null) return;
+        int unlockLevel = 1 + index * 5;
+        if (playerCreature.level < unlockLevel) return;
+        if (playerCreature.attacks == null || index < 0 || index >= playerCreature.attacks.Count) return;
+
+        AttackData atk = playerCreature.attacks[index];
+        if (atk == null) return;
+        if (atk.currentPP <= 0) return;
+
+        if (movePanel != null) movePanel.SetActive(false);
+        SetActionMenuVisible(true);
+        SetBackButtonVisible(false);
+        waitingForPlayerMove = false;
+        turnResolutionInProgress = true;
+        RefreshTurnInputState();
+        StartCoroutine(ResolveTurn(atk));
+    }
+
+    IEnumerator ResolveTurn(AttackData playerAttack)
+    {
+        if (!turnResolutionInProgress) turnResolutionInProgress = true;
+        waitingForPlayerMove = false;
+        RefreshTurnInputState();
+        yield return new WaitForSeconds(actionPhaseDelay);
+
+        AttackData enemyAttack = ChooseEnemyAttack();
+        yield return PerformAttack(playerCreature, enemyCreature, playerAttack);
+        if (enemyCreature.currentHP <= 0)
+        {
+            turnResolutionInProgress = false;
+            EndBattle(true);
+            yield break;
+        }
+
+        SetMessage("Opponent's turn.");
+        yield return new WaitForSeconds(opponentTurnDelay);
+
+        yield return PerformAttack(enemyCreature, playerCreature, enemyAttack);
+        if (playerCreature.currentHP <= 0)
+        {
+            turnResolutionInProgress = false;
+            HandlePlayerDefeat();
+            yield break;
+        }
+
+        ApplyEndOfTurnStatuses(playerCreature);
+        ApplyEndOfTurnStatuses(enemyCreature);
+
+        UpdateUI();
+        waitingForPlayerMove = true;
+        turnResolutionInProgress = false;
+        SetActionMenuVisible(true);
+        SetBackButtonVisible(false);
+        SetMessage("Choose an action.");
+        RefreshTurnInputState();
+    }
+
+    AttackData ChooseEnemyAttack()
+    {
+        if (enemyCreature.attacks == null || enemyCreature.attacks.Count == 0)
+        {
+            enemyCreature.InitWhelpling(Mathf.Max(1, enemyCreature.level));
+        }
+
+        for (int i = 0; i < enemyCreature.attacks.Count; i++)
+        {
+            int unlockLevel = 1 + i * 5;
+            AttackData candidate = enemyCreature.attacks[i];
+            if (candidate == null) continue;
+            if (enemyCreature.level >= unlockLevel && candidate.currentPP > 0)
+            {
+                return candidate;
+            }
+        }
+        return enemyCreature.attacks[0];
+    }
+
+    bool DecideTurnOrder()
+    {
+        if (playerCreature.speed > enemyCreature.speed) return true;
+        if (playerCreature.speed < enemyCreature.speed) return false;
+        return Random.value > 0.5f;
+    }
+
+    IEnumerator PerformAttack(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk)
+    {
+        Image attackerImage = GetSpriteImageForCombatant(attacker);
+        Image defenderImage = GetSpriteImageForCombatant(defender);
+
+        if (IsSkippedByStatus(attacker))
+        {
+            SetMessage(attacker.creatureName + " hesitated!");
+            yield return new WaitForSeconds(0.5f);
+            yield break;
+        }
+
+        atk.currentPP = Mathf.Max(0, atk.currentPP - 1);
+
+        if (!RollAccuracy(atk.accuracy))
+        {
+            SetMessage(attacker.creatureName + " missed!");
+            yield return new WaitForSeconds(0.5f);
+            yield break;
+        }
+
+        bool isCrit = RollCrit();
+        int damage = CalculateDamage(attacker, defender, atk, isCrit);
+
+        yield return StartCoroutine(AnimateAttack(attackerImage, defenderImage, atk.baseDamage > 0));
+
+        if (atk.baseDamage > 0)
+        {
+            defender.currentHP = Mathf.Max(0, defender.currentHP - damage);
+        }
+
+        ApplyStatusFromAttack(defender, atk, isCrit);
+
+        UpdateUI();
+
+        SetMessage(attacker.creatureName + " used " + atk.name + "!");
+        yield return new WaitForSeconds(actionNarrationDelay);
+    }
+
+    bool RollAccuracy(int accuracy)
+    {
+        int roll = Random.Range(1, 101);
+        return roll <= accuracy;
+    }
+
+    bool RollCrit()
+    {
+        return Random.value <= 0.10f;
+    }
+
+    int CalculateDamage(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk, bool isCrit)
+    {
+        int dmg = isCrit ? atk.critDamage : atk.baseDamage;
+        if (dmg <= 0) return 0;
+
+        float multiplier = TypeMultiplier(atk.type, defender.types.Length > 0 ? defender.types[0] : CreatureType.Normal);
+
+        if (attacker.HasStatus(StatusEffectType.Burn) && atk.isPhysical)
+        {
+            multiplier *= 0.5f;
+        }
+
+        int finalDmg = Mathf.FloorToInt(dmg * multiplier);
+        if (finalDmg < 1) finalDmg = 1;
+        return finalDmg;
+    }
+
+    float TypeMultiplier(CreatureType atk, CreatureType def)
+    {
+        if (atk == CreatureType.Fire)
+        {
+            if (def == CreatureType.Nature || def == CreatureType.Ice) return 1.5f;
+            if (def == CreatureType.Water || def == CreatureType.Earth) return 0.5f;
+        }
+        else if (atk == CreatureType.Water)
+        {
+            if (def == CreatureType.Fire || def == CreatureType.Earth) return 1.5f;
+            if (def == CreatureType.Lightning) return 0.5f;
+        }
+        else if (atk == CreatureType.Dragon)
+        {
+            if (def == CreatureType.Dragon) return 1.5f;
+        }
+        else if (atk == CreatureType.Nature)
+        {
+            if (def == CreatureType.Earth || def == CreatureType.Water || def == CreatureType.Dark) return 1.5f;
+            if (def == CreatureType.Fire || def == CreatureType.Ice) return 0.5f;
+        }
+        else if (atk == CreatureType.Ice)
+        {
+            if (def == CreatureType.Nature || def == CreatureType.Earth || def == CreatureType.Dragon) return 1.5f;
+            if (def == CreatureType.Fire) return 0.5f;
+        }
+        else if (atk == CreatureType.Lightning)
+        {
+            if (def == CreatureType.Water) return 1.5f;
+            if (def == CreatureType.Earth) return 0.5f;
+        }
+        else if (atk == CreatureType.Earth)
+        {
+            if (def == CreatureType.Fire || def == CreatureType.Lightning) return 1.5f;
+            if (def == CreatureType.Nature || def == CreatureType.Water) return 0.5f;
+        }
+        else if (atk == CreatureType.Light)
+        {
+            if (def == CreatureType.Earth || def == CreatureType.Dark) return 1.5f;
+        }
+        else if (atk == CreatureType.Dark)
+        {
+            if (def == CreatureType.Nature || def == CreatureType.Light) return 1.5f;
+            if (def == CreatureType.Lightning) return 0.5f;
+        }
+        return 1f;
+    }
+
+    void ApplyStatusFromAttack(CreatureCombatant defender, AttackData atk, bool isCrit)
+    {
+        if (atk.statusToApply == null) return;
+
+        if (atk.name == "Ancient Croak")
+        {
+            int turns = isCrit ? Random.Range(2, 4) : 1;
+            defender.AddOrRefreshStatus(StatusEffectType.Anxious, turns);
+            return;
+        }
+
+        if (Random.value <= atk.statusChance)
+        {
+            if (atk.statusToApply.Value == StatusEffectType.Burn)
+            {
+                defender.AddOrRefreshStatus(StatusEffectType.Burn, 3);
+            }
+            else if (atk.statusToApply.Value == StatusEffectType.Wet)
+            {
+                defender.AddOrRefreshStatus(StatusEffectType.Wet, 3);
+            }
+        }
+    }
+
+    bool IsSkippedByStatus(CreatureCombatant combatant)
+    {
+        if (combatant.HasStatus(StatusEffectType.Frozen))
+        {
+            combatant.TickStatus(StatusEffectType.Frozen);
+            return true;
+        }
+
+        if (combatant.HasStatus(StatusEffectType.Anxious))
+        {
+            StatusEffect s = combatant.GetStatus(StatusEffectType.Anxious);
+            bool acts = Random.value <= 0.10f;
+            if (!acts)
+            {
+                s.turns -= 1;
+                if (s.turns <= 0) combatant.statusEffects.Remove(s);
+                return true;
+            }
+        }
+
+        if (combatant.HasStatus(StatusEffectType.Paralysed))
+        {
+            if (Random.value <= 0.20f) return true;
+        }
+
+        return false;
+    }
+
+    void ApplyEndOfTurnStatuses(CreatureCombatant combatant)
+    {
+        if (combatant.HasStatus(StatusEffectType.Burn))
+        {
+            combatant.currentHP = Mathf.Max(0, combatant.currentHP - 2);
+            combatant.TickStatus(StatusEffectType.Burn);
+        }
+
+        if (combatant.HasStatus(StatusEffectType.Wet))
+        {
+            combatant.TickStatus(StatusEffectType.Wet);
+        }
+
+        if (combatant.HasStatus(StatusEffectType.Paralysed))
+        {
+            combatant.TickStatus(StatusEffectType.Paralysed);
+        }
+
+        if (combatant.HasStatus(StatusEffectType.Poisoned))
+        {
+            combatant.TickStatus(StatusEffectType.Poisoned);
+        }
+    }
+
+    void HandlePlayerDefeat()
+    {
+        SetMessage("Your creature fainted!");
+        EndBattle(false);
+        if (playerHealth != null)
+        {
+            playerHealth.TakeDamage(playerHealth.maxHealth, true);
+        }
+    }
+
+    void TryRun()
+    {
+        if (!inBattle || !waitingForPlayerMove || turnResolutionInProgress) return;
+
+        waitingForPlayerMove = false;
+        if (movePanel != null) movePanel.SetActive(false);
+        SetActionMenuVisible(true);
+        SetBackButtonVisible(false);
+        SetMessage("You fled safely.");
+        EndBattle(false);
+    }
+
+    void UpdateUI()
+    {
+        EnsureEnemyHpText();
+
+        if (playerCreature != null)
+        {
+            if (playerNameText != null) playerNameText.text = playerCreature.creatureName;
+            if (playerLevelText != null) playerLevelText.text = "Lv " + playerCreature.level;
+            if (playerTypesText != null) playerTypesText.text = TypesToString(playerCreature.types);
+            if (playerHpText != null) playerHpText.text = playerCreature.currentHP + " / " + playerCreature.maxHP;
+            float playerHpRatio = playerCreature.maxHP > 0 ? (float)playerCreature.currentHP / playerCreature.maxHP : 0f;
+            ApplyHpFillVisual(playerHpFill, playerHpRatio);
+        }
+        else
+        {
+            if (playerNameText != null) playerNameText.text = "Unknown";
+            if (playerLevelText != null) playerLevelText.text = "Lv ?";
+            if (playerTypesText != null) playerTypesText.text = "None";
+            if (playerHpText != null) playerHpText.text = "-- / --";
+            ApplyHpFillVisual(playerHpFill, 0f);
+        }
+
+        if (enemyCreature != null)
+        {
+            if (enemyNameText != null) enemyNameText.text = enemyCreature.creatureName;
+            if (enemyLevelText != null) enemyLevelText.text = "Lv " + enemyCreature.level;
+            if (enemyTypesText != null) enemyTypesText.text = TypesToString(enemyCreature.types);
+            if (enemyHpText != null) enemyHpText.text = enemyCreature.currentHP + " / " + enemyCreature.maxHP;
+            float enemyHpRatio = enemyCreature.maxHP > 0 ? (float)enemyCreature.currentHP / enemyCreature.maxHP : 0f;
+            ApplyHpFillVisual(enemyHpFill, enemyHpRatio);
+        }
+        else
+        {
+            if (enemyNameText != null) enemyNameText.text = "Unknown";
+            if (enemyLevelText != null) enemyLevelText.text = "Lv ?";
+            if (enemyTypesText != null) enemyTypesText.text = "None";
+            if (enemyHpText != null) enemyHpText.text = "-- / --";
+            ApplyHpFillVisual(enemyHpFill, 0f);
+        }
+    }
+
+    void ApplyHpFillVisual(Image hpFill, float ratio)
+    {
+        if (hpFill == null) return;
+
+        float clamped = Mathf.Clamp01(ratio);
+        hpFill.fillAmount = clamped;
+        // Pokemon-like tier steps:
+        // 100% = green, 75% = light green, 50% = orange, 25% and below = red.
+        if (clamped > 0.75f)
+        {
+            hpFill.color = HpGreen;
+        }
+        else if (clamped > 0.5f)
+        {
+            hpFill.color = HpLightGreen;
+        }
+        else if (clamped > 0.25f)
+        {
+            hpFill.color = HpOrange;
+        }
+        else
+        {
+            hpFill.color = HpRed;
+        }
+    }
+
+    string TypesToString(CreatureType[] types)
+    {
+        if (types == null || types.Length == 0) return "None";
+        return string.Join(" / ", types);
+    }
+
+    void SetActionMenuVisible(bool visible)
+    {
+        if (actionMenu != null)
+        {
+            actionMenu.SetActive(visible);
+        }
+    }
+
+    void SetBackButtonVisible(bool visible)
+    {
+        if (backButton != null)
+        {
+            backButton.gameObject.SetActive(visible);
+            backButton.interactable = visible;
+            UpdateButtonVisualState(backButton);
+        }
+    }
+
+    void OnBackPressed()
+    {
+        if (movePanel != null) movePanel.SetActive(false);
+        SetActionMenuVisible(true);
+        SetBackButtonVisible(false);
+        SetMessage("Choose an action.");
+        RefreshTurnInputState();
+    }
+
+    void ApplyEncounterLayout()
+    {
+        if (battleRoot == null) return;
+
+        Image bg = battleRoot.GetComponent<Image>();
+        if (bg == null)
+        {
+            bg = battleRoot.AddComponent<Image>();
+        }
+        if (bg != null)
+        {
+            bg.color = new Color(0f, 0f, 0f, 1f);
+            bg.raycastTarget = false;
+        }
+
+        RectTransform rootRt = battleRoot.GetComponent<RectTransform>();
+        if (rootRt != null)
+        {
+            rootRt.anchorMin = Vector2.zero;
+            rootRt.anchorMax = Vector2.one;
+            rootRt.offsetMin = Vector2.zero;
+            rootRt.offsetMax = Vector2.zero;
+            // Keep root unscaled (or slightly reduced) so anchored children never clip out of view.
+            float zoom = Mathf.Clamp(battleUiZoom <= 0f ? 1f : battleUiZoom, 0.9f, 1f);
+            rootRt.localScale = Vector3.one * zoom;
+        }
+
+        if (arenaPanel != null)
+        {
+            arenaPanel.anchorMin = new Vector2(0f, 0.28f);
+            arenaPanel.anchorMax = new Vector2(1f, 1f);
+            arenaPanel.offsetMin = Vector2.zero;
+            arenaPanel.offsetMax = Vector2.zero;
+            arenaPanel.localScale = Vector3.one;
+            Image arenaBg = arenaPanel.GetComponent<Image>();
+            if (arenaBg != null) arenaBg.raycastTarget = false;
+        }
+
+        if (uiPanel != null)
+        {
+            uiPanel.anchorMin = new Vector2(0f, 0f);
+            uiPanel.anchorMax = new Vector2(1f, 1f);
+            uiPanel.offsetMin = Vector2.zero;
+            uiPanel.offsetMax = Vector2.zero;
+            Image uiBg = uiPanel.GetComponent<Image>();
+            if (uiBg != null)
+            {
+                uiBg.color = new Color(0f, 0f, 0f, 0f);
+                uiBg.raycastTarget = false;
+            }
+            uiPanel.localScale = Vector3.one;
+        }
+
+        if (actionMenu != null)
+        {
+            Image actionBg = actionMenu.GetComponent<Image>();
+            if (actionBg != null)
+            {
+                actionBg.color = new Color(1f, 1f, 1f, 0f);
+                actionBg.sprite = null;
+                actionBg.raycastTarget = false;
+            }
+            actionMenu.transform.localScale = Vector3.one;
+        }
+        if (movePanel != null)
+        {
+            Image moveBg = movePanel.GetComponent<Image>();
+            if (moveBg != null)
+            {
+                moveBg.color = new Color(1f, 1f, 1f, 0f);
+                moveBg.sprite = null;
+                moveBg.raycastTarget = false;
+            }
+            movePanel.transform.localScale = Vector3.one;
+        }
+
+        RectTransform playerBar = FindRect(battleRoot.transform, "UIPanel/PlayerBar");
+        RectTransform enemyBar = FindRect(battleRoot.transform, "UIPanel/EnemyBar");
+        if (playerBar != null)
+        {
+            playerBar.anchorMin = new Vector2(0f, 1f);
+            playerBar.anchorMax = new Vector2(0f, 1f);
+            playerBar.pivot = new Vector2(0f, 1f);
+            playerBar.anchoredPosition = new Vector2(20f, -20f);
+            playerBar.sizeDelta = new Vector2(430f, 120f);
+            Image barImage = playerBar.GetComponent<Image>();
+            if (barImage != null) barImage.raycastTarget = false;
+        }
+        if (enemyBar != null)
+        {
+            enemyBar.anchorMin = new Vector2(1f, 1f);
+            enemyBar.anchorMax = new Vector2(1f, 1f);
+            enemyBar.pivot = new Vector2(1f, 1f);
+            enemyBar.anchoredPosition = new Vector2(-20f, -20f);
+            enemyBar.sizeDelta = new Vector2(430f, 120f);
+            Image barImage = enemyBar.GetComponent<Image>();
+            if (barImage != null) barImage.raycastTarget = false;
+        }
+
+        if (actionMenu != null)
+        {
+            RectTransform rt = actionMenu.GetComponent<RectTransform>();
+            if (rt != null)
+            {
+                rt.anchorMin = new Vector2(0.5f, 0.17f);
+                rt.anchorMax = new Vector2(0.5f, 0.17f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.anchoredPosition = new Vector2(0f, 0f);
+                rt.sizeDelta = new Vector2(980f, 250f);
+            }
+        }
+        if (movePanel != null)
+        {
+            RectTransform rt = movePanel.GetComponent<RectTransform>();
+            if (rt != null)
+            {
+                rt.anchorMin = new Vector2(0.5f, 0.17f);
+                rt.anchorMax = new Vector2(0.5f, 0.17f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.anchoredPosition = new Vector2(0f, 0f);
+                rt.sizeDelta = new Vector2(980f, 250f);
+            }
+        }
+
+        LayoutActionButtons();
+        LayoutMoveButtons();
+        EnsureMoveButtonLabels();
+        EnsureButtonLabels();
+        ApplyButtonSkins();
+
+        SafeLayoutStep("EnsureBattleBackground", EnsureBattleBackground);
+        SafeLayoutStep("EnsureSpriteImages", EnsureSpriteImages);
+        SafeLayoutStep("EnsureSpriteShadows", EnsureSpriteShadows);
+        SafeLayoutStep("EnsureBottomFrame", EnsureBottomFrame);
+        SafeLayoutStep("EnsureBackButton", EnsureBackButton);
+        SafeLayoutStep("EnsureEnemyHpText", EnsureEnemyHpText);
+        SafeLayoutStep("EnsureMessagePresentation", EnsureMessagePresentation);
+        RefreshTurnInputState();
+    }
+
+    void SafeLayoutStep(string stepName, System.Action action)
+    {
+        if (action == null) return;
+        try
+        {
+            action.Invoke();
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("BattleSystem layout step failed: " + stepName + " :: " + ex.Message);
+        }
+    }
+
+    void EnsureBattleBackground()
+    {
+        if (battleRoot == null) return;
+        if (battleBackgroundSprite == null && battleBackgroundTexture == null)
+        {
+            battleBackgroundTexture = Resources.Load<Texture2D>("UI/BattleSceneBackground");
+        }
+#if UNITY_EDITOR
+        if (battleBackgroundSprite == null && battleBackgroundTexture == null)
+        {
+            Texture2D editorTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/ChatGPT Image Mar 12, 2026, 08_41_45 PM.png");
+            if (editorTex != null)
+            {
+                battleBackgroundTexture = editorTex;
+            }
+        }
+#endif
+
+        Transform existing = battleRoot.transform.Find("BattleBackground");
+        if (existing == null)
+        {
+            GameObject go = new GameObject("BattleBackground", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(battleRoot.transform, false);
+            existing = go.transform;
+            existing.SetAsFirstSibling();
+        }
+
+        battleBackgroundImage = existing.GetComponent<Image>();
+        RectTransform rt = existing as RectTransform;
+        if (rt != null)
+        {
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            // Lift the framing upward so the horizon sits slightly higher.
+            rt.anchoredPosition = new Vector2(0f, 98f);
+            rt.sizeDelta = new Vector2(0f, 168f);
+        }
+
+        if (battleBackgroundImage != null)
+        {
+            Sprite bgSprite = battleBackgroundSprite != null ? battleBackgroundSprite : CreateSprite(battleBackgroundTexture);
+            if (bgSprite != null)
+            {
+                battleBackgroundImage.sprite = bgSprite;
+                battleBackgroundImage.color = Color.white;
+            }
+            else
+            {
+                battleBackgroundImage.color = new Color(0.05f, 0.10f, 0.08f, 1f);
+            }
+
+            battleBackgroundImage.type = Image.Type.Simple;
+            battleBackgroundImage.preserveAspect = false;
+            battleBackgroundImage.raycastTarget = false;
+        }
+    }
+
+    void EnsureBottomFrame()
+    {
+        if (uiPanel == null) return;
+        if (bottomFrameTexture == null)
+        {
+            bottomFrameTexture = Resources.Load<Texture2D>("UI/BattleFrameMarker");
+        }
+
+        Transform existing = uiPanel.Find("BottomFrame");
+        if (existing == null)
+        {
+            GameObject go = new GameObject("BottomFrame", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(uiPanel, false);
+            existing = go.transform;
+            existing.SetAsFirstSibling();
+        }
+
+        bottomFrameImage = existing.GetComponent<Image>();
+        RectTransform rt = existing as RectTransform;
+        if (rt != null)
+        {
+            rt.anchorMin = new Vector2(0f, 0f);
+            rt.anchorMax = new Vector2(1f, 0.34f);
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+        }
+
+        if (bottomFrameImage != null)
+        {
+            if (bottomFrameTexture != null)
+            {
+                bottomFrameImage.sprite = Sprite.Create(
+                    bottomFrameTexture,
+                    new Rect(0, 0, bottomFrameTexture.width, bottomFrameTexture.height),
+                    new Vector2(0.5f, 0.5f),
+                    100f
+                );
+            }
+            bottomFrameImage.color = Color.white;
+            bottomFrameImage.type = Image.Type.Simple;
+            bottomFrameImage.preserveAspect = false;
+            bottomFrameImage.raycastTarget = false;
+        }
+    }
+
+    void EnsureMoveButtonLabels()
+    {
+        for (int i = 0; i < moveButtons.Length; i++)
+        {
+            if (moveButtons[i] == null) continue;
+            Transform t = moveButtons[i].transform.Find("Text");
+            if (t == null)
+            {
+                GameObject textGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+                textGo.transform.SetParent(moveButtons[i].transform, false);
+                t = textGo.transform;
+            }
+
+            RectTransform rt = t as RectTransform;
+            Text txt = t.GetComponent<Text>();
+            if (rt != null)
+            {
+                rt.anchorMin = Vector2.zero;
+                rt.anchorMax = Vector2.one;
+                rt.offsetMin = Vector2.zero;
+                rt.offsetMax = Vector2.zero;
+                rt.anchoredPosition = Vector2.zero;
+            }
+            if (txt != null)
+            {
+                if (txt.font == null) txt.font = GetDefaultUIFont();
+                txt.alignment = TextAnchor.MiddleCenter;
+                txt.color = Color.white;
+                txt.fontSize = 26;
+                txt.fontStyle = FontStyle.Bold;
+                txt.raycastTarget = false;
+                Outline o = txt.GetComponent<Outline>();
+                if (o == null) o = txt.gameObject.AddComponent<Outline>();
+                o.effectColor = new Color(0f, 0f, 0f, 0.95f);
+                o.effectDistance = new Vector2(2f, -2f);
+            }
+        }
+    }
+
+    void EnsureBackButton()
+    {
+        if (movePanel == null) return;
+        Transform existing = movePanel.transform.Find("BackButton");
+        if (existing == null)
+        {
+            GameObject go = new GameObject("BackButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            go.transform.SetParent(movePanel.transform, false);
+            existing = go.transform;
+
+            GameObject textGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            textGo.transform.SetParent(existing, false);
+            Text t = textGo.GetComponent<Text>();
+            t.text = "Back";
+            if (t.font == null) t.font = GetDefaultUIFont();
+            t.alignment = TextAnchor.MiddleCenter;
+            t.color = Color.white;
+            t.fontSize = 20;
+            t.fontStyle = FontStyle.Bold;
+            RectTransform tr = textGo.GetComponent<RectTransform>();
+            tr.anchorMin = Vector2.zero;
+            tr.anchorMax = Vector2.one;
+            tr.offsetMin = Vector2.zero;
+            tr.offsetMax = Vector2.zero;
+        }
+
+        backButton = existing.GetComponent<Button>();
+        Image img = existing.GetComponent<Image>();
+        RectTransform rtBtn = existing as RectTransform;
+        if (img != null) img.color = Color.white;
+        if (rtBtn != null)
+        {
+            rtBtn.anchorMin = new Vector2(0f, 0.5f);
+            rtBtn.anchorMax = new Vector2(0f, 0.5f);
+            rtBtn.pivot = new Vector2(1f, 0.5f);
+            // Keep the back button left of the move buttons, matching prior placement intent.
+            rtBtn.anchoredPosition = new Vector2(-235f, -70f);
+            rtBtn.sizeDelta = new Vector2(220f, 86f);
+        }
+
+        if (backButton != null)
+        {
+            ConfigureButtonLabel(backButton, "BACK");
+            backButton.onClick.RemoveAllListeners();
+            backButton.onClick.AddListener(OnBackPressed);
+            backButton.transform.SetAsLastSibling();
+            Text backLabel = backButton.GetComponentInChildren<Text>(true);
+            if (backLabel != null)
+            {
+                backLabel.text = "BACK";
+                backLabel.color = new Color(0.05f, 0.05f, 0.06f, 1f);
+                backLabel.fontSize = 38;
+                Outline o = backLabel.GetComponent<Outline>();
+                if (o == null) o = backLabel.gameObject.AddComponent<Outline>();
+                o.effectColor = new Color(1f, 1f, 1f, 0.82f);
+                o.effectDistance = new Vector2(1.5f, -1.5f);
+            }
+            bool shouldBeVisible = inBattle && movePanel.activeSelf;
+            backButton.gameObject.SetActive(shouldBeVisible);
+            backButton.interactable = shouldBeVisible;
+            UpdateButtonVisualState(backButton);
+        }
+    }
+
+    void EnsureEnemyHpText()
+    {
+        if (battleRoot == null) return;
+
+        if (enemyHpText == null)
+        {
+            Transform rootTf = battleRoot.transform;
+            enemyHpText = FindText(rootTf, "UIPanel/EnemyBar/EnemyHpText");
+            enemyHpText = enemyHpText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyHpBG/EnemyHpText");
+        }
+
+        if (enemyHpText == null && enemyHpBg != null)
+        {
+            GameObject go = new GameObject("EnemyHpText", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            Transform parent = enemyHpBg.transform.parent != null ? enemyHpBg.transform.parent : enemyHpBg.transform;
+            go.transform.SetParent(parent, false);
+            enemyHpText = go.GetComponent<Text>();
+        }
+
+        if (enemyHpText == null) return;
+        if (enemyHpBg != null)
+        {
+            Transform desiredParent = enemyHpBg.transform.parent != null ? enemyHpBg.transform.parent : enemyHpBg.transform;
+            if (enemyHpText.transform.parent != desiredParent)
+            {
+                enemyHpText.transform.SetParent(desiredParent, false);
+            }
+        }
+
+        RectTransform rt = enemyHpText.rectTransform;
+        RectTransform playerRt = playerHpText != null ? playerHpText.rectTransform : null;
+        if (playerHpText != null)
+        {
+            enemyHpText.font = playerHpText.font != null ? playerHpText.font : GetDefaultUIFont();
+            enemyHpText.alignment = playerHpText.alignment;
+            enemyHpText.fontSize = playerHpText.fontSize;
+            enemyHpText.fontStyle = playerHpText.fontStyle;
+            enemyHpText.color = playerHpText.color;
+            enemyHpText.raycastTarget = playerHpText.raycastTarget;
+            enemyHpText.horizontalOverflow = playerHpText.horizontalOverflow;
+            enemyHpText.verticalOverflow = playerHpText.verticalOverflow;
+            enemyHpText.lineSpacing = playerHpText.lineSpacing;
+            enemyHpText.supportRichText = playerHpText.supportRichText;
+
+            if (playerRt != null)
+            {
+                rt.anchorMin = playerRt.anchorMin;
+                rt.anchorMax = playerRt.anchorMax;
+                rt.pivot = playerRt.pivot;
+                rt.anchoredPosition = playerRt.anchoredPosition;
+                rt.sizeDelta = playerRt.sizeDelta;
+            }
+        }
+        else
+        {
+            if (enemyHpText.font == null) enemyHpText.font = GetDefaultUIFont();
+            enemyHpText.alignment = TextAnchor.UpperLeft;
+            enemyHpText.fontSize = 16;
+            enemyHpText.fontStyle = FontStyle.Normal;
+            enemyHpText.color = Color.white;
+            enemyHpText.raycastTarget = true;
+            rt.anchorMin = new Vector2(0f, 0f);
+            rt.anchorMax = new Vector2(0f, 0f);
+            rt.pivot = new Vector2(0f, 0f);
+            rt.anchoredPosition = new Vector2(280f, 10f);
+            rt.sizeDelta = new Vector2(120f, 20f);
+        }
+
+        Outline playerOutline = playerHpText != null ? playerHpText.GetComponent<Outline>() : null;
+        Outline enemyOutline = enemyHpText.GetComponent<Outline>();
+        if (playerOutline != null)
+        {
+            if (enemyOutline == null) enemyOutline = enemyHpText.gameObject.AddComponent<Outline>();
+            enemyOutline.effectColor = playerOutline.effectColor;
+            enemyOutline.effectDistance = playerOutline.effectDistance;
+            enemyOutline.useGraphicAlpha = playerOutline.useGraphicAlpha;
+        }
+        else if (enemyOutline != null)
+        {
+            if (Application.isPlaying) Destroy(enemyOutline);
+            else DestroyImmediate(enemyOutline);
+        }
+
+        enemyHpText.transform.SetAsLastSibling();
+    }
+
+    void EnsureSpriteShadows()
+    {
+        if (arenaPanel == null) return;
+
+        if (shadowEllipseSprite == null)
+        {
+            shadowEllipseSprite = CreateShadowEllipseSprite();
+        }
+
+        if (playerShadowImage == null)
+        {
+            Transform existing = arenaPanel.Find("PlayerCreatureShadow");
+            if (existing == null)
+            {
+                GameObject go = new GameObject("PlayerCreatureShadow", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                go.transform.SetParent(arenaPanel, false);
+                existing = go.transform;
+            }
+            playerShadowImage = existing.GetComponent<Image>();
+        }
+
+        if (enemyShadowImage == null)
+        {
+            Transform existing = arenaPanel.Find("EnemyCreatureShadow");
+            if (existing == null)
+            {
+                GameObject go = new GameObject("EnemyCreatureShadow", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                go.transform.SetParent(arenaPanel, false);
+                existing = go.transform;
+            }
+            enemyShadowImage = existing.GetComponent<Image>();
+        }
+
+        ConfigureShadowRect(playerShadowImage, new Vector2(0.14f, -0.06f), new Vector2(250f, 84f));
+        ConfigureShadowRect(enemyShadowImage, new Vector2(0.86f, -0.06f), new Vector2(250f, 84f));
+    }
+
+    void ConfigureShadowRect(Image shadow, Vector2 anchor, Vector2 size)
+    {
+        if (shadow == null) return;
+        RectTransform rt = shadow.rectTransform;
+        rt.anchorMin = anchor;
+        rt.anchorMax = anchor;
+        rt.pivot = new Vector2(0.5f, 0f);
+        rt.anchoredPosition = Vector2.zero;
+        rt.sizeDelta = size;
+        shadow.sprite = shadowEllipseSprite;
+        shadow.color = new Color(0f, 0f, 0f, 0.42f);
+        shadow.raycastTarget = false;
+        shadow.preserveAspect = false;
+        shadow.enabled = true;
+        shadow.transform.SetAsFirstSibling();
+    }
+
+    Sprite CreateShadowEllipseSprite()
+    {
+        const int w = 128;
+        const int h = 48;
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 center = new Vector2((w - 1) * 0.5f, (h - 1) * 0.5f);
+        float rx = w * 0.48f;
+        float ry = h * 0.46f;
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                float nx = (x - center.x) / rx;
+                float ny = (y - center.y) / ry;
+                float d = Mathf.Sqrt(nx * nx + ny * ny);
+                float a = Mathf.Clamp01(1f - d);
+                a = Mathf.Pow(a, 1.8f) * 0.95f;
+                tex.SetPixel(x, y, new Color(0f, 0f, 0f, a));
+            }
+        }
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0f, 0f, w, h), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    void EnsureSpriteImages()
+    {
+        if (arenaPanel == null) return;
+
+        if (playerSpriteImage == null)
+        {
+            Transform existing = arenaPanel.Find("PlayerCreatureImage");
+            if (existing == null)
+            {
+                GameObject go = new GameObject("PlayerCreatureImage", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                go.transform.SetParent(arenaPanel, false);
+                existing = go.transform;
+            }
+            playerSpriteImage = existing.GetComponent<Image>();
+        }
+
+        if (enemySpriteImage == null)
+        {
+            Transform existing = arenaPanel.Find("EnemyCreatureImage");
+            if (existing == null)
+            {
+                GameObject go = new GameObject("EnemyCreatureImage", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                go.transform.SetParent(arenaPanel, false);
+                existing = go.transform;
+            }
+            enemySpriteImage = existing.GetComponent<Image>();
+        }
+
+        if (playerSpriteImage != null)
+        {
+            RectTransform rt = playerSpriteImage.rectTransform;
+            rt.anchorMin = new Vector2(0.14f, -0.04f);
+            rt.anchorMax = new Vector2(0.14f, -0.04f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = new Vector2(560f, 560f);
+            playerSpriteImage.color = Color.clear;
+            playerSpriteImage.raycastTarget = false;
+            playerSpriteImage.preserveAspect = true;
+            playerSpriteImage.enabled = true;
+            playerSpriteImage.transform.SetAsLastSibling();
+            playerSpriteBaseLocalPos = rt.localPosition;
+        }
+
+        if (enemySpriteImage != null)
+        {
+            RectTransform rt = enemySpriteImage.rectTransform;
+            rt.anchorMin = new Vector2(0.86f, -0.04f);
+            rt.anchorMax = new Vector2(0.86f, -0.04f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = new Vector2(560f, 560f);
+            enemySpriteImage.color = Color.clear;
+            enemySpriteImage.raycastTarget = false;
+            enemySpriteImage.preserveAspect = true;
+            enemySpriteImage.enabled = true;
+            enemySpriteImage.transform.SetAsLastSibling();
+            enemySpriteBaseLocalPos = rt.localPosition;
+        }
+    }
+
+    void LayoutActionButtons()
+    {
+        LayoutButtonRect(attackButton, new Vector2(-270f, 70f), new Vector2(500f, 120f));
+        LayoutButtonRect(swapButton, new Vector2(270f, 70f), new Vector2(500f, 120f));
+        LayoutButtonRect(captureButton, new Vector2(-270f, -70f), new Vector2(500f, 120f));
+        LayoutButtonRect(runButton, new Vector2(270f, -70f), new Vector2(500f, 120f));
+    }
+
+    void LayoutMoveButtons()
+    {
+        LayoutButtonRect(moveButtons[0], new Vector2(-270f, 70f), new Vector2(510f, 122f));
+        LayoutButtonRect(moveButtons[1], new Vector2(270f, 70f), new Vector2(510f, 122f));
+        LayoutButtonRect(moveButtons[2], new Vector2(-270f, -70f), new Vector2(510f, 122f));
+        LayoutButtonRect(moveButtons[3], new Vector2(270f, -70f), new Vector2(510f, 122f));
+    }
+
+    void LayoutButtonRect(Button button, Vector2 pos, Vector2 size)
+    {
+        if (button == null) return;
+        RectTransform rt = button.GetComponent<RectTransform>();
+        if (rt == null) return;
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+    }
+
+    Image GetSpriteImageForCombatant(CreatureCombatant combatant)
+    {
+        if (combatant == null) return null;
+        if (playerCreature == combatant) return playerSpriteImage;
+        if (enemyCreature == combatant) return enemySpriteImage;
+        return null;
+    }
+
+    IEnumerator AnimateAttack(Image attacker, Image defender, bool didHit)
+    {
+        if (attacker == null || defender == null)
+        {
+            yield return new WaitForSeconds(0.1f);
+            yield break;
+        }
+
+        if (!activeAttackAnimations.Add(attacker))
+        {
+            yield break;
+        }
+
+        RectTransform attackerRt = attacker.rectTransform;
+        RectTransform defenderRt = defender.rectTransform;
+
+        Vector3 start = attackerRt.localPosition;
+        Vector3 target = defenderRt.localPosition;
+        Vector3 dir = (target - start).normalized;
+        float dashDistance = Mathf.Clamp(Vector3.Distance(start, target) * 0.32f, 110f, 230f);
+        Vector3 dashPos = start + (dir * dashDistance);
+
+        float dashTime = 0.12f;
+        float t = 0f;
+        while (t < dashTime)
+        {
+            t += Time.deltaTime;
+            attackerRt.localPosition = Vector3.Lerp(start, dashPos, Mathf.Clamp01(t / dashTime));
+            yield return null;
+        }
+        attackerRt.localPosition = dashPos;
+
+        if (didHit)
+        {
+            yield return StartCoroutine(AnimateHitShake(defenderRt, 0.14f, 10f));
+        }
+        else
+        {
+            yield return new WaitForSeconds(0.05f);
+        }
+
+        float returnTime = 0.14f;
+        t = 0f;
+        while (t < returnTime)
+        {
+            t += Time.deltaTime;
+            attackerRt.localPosition = Vector3.Lerp(dashPos, start, Mathf.Clamp01(t / returnTime));
+            yield return null;
+        }
+        attackerRt.localPosition = start;
+        activeAttackAnimations.Remove(attacker);
+
+        if (attacker == playerSpriteImage)
+        {
+            playerSpriteBaseLocalPos = attackerRt.localPosition;
+        }
+        else if (attacker == enemySpriteImage)
+        {
+            enemySpriteBaseLocalPos = attackerRt.localPosition;
+        }
+    }
+
+    IEnumerator AnimateHitShake(RectTransform targetRt, float duration, float strength)
+    {
+        Vector2 start = targetRt.anchoredPosition;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float x = Mathf.Sin(elapsed * 85f) * strength;
+            targetRt.anchoredPosition = start + new Vector2(x, 0f);
+            yield return null;
+        }
+        targetRt.anchoredPosition = start;
+    }
+
+    void UpdateCreatureSprites()
+    {
+        Sprite playerSprite = ResolveCombatantSprite(playerCreature, true);
+        Sprite enemySprite = ResolveCombatantSprite(enemyCreature, false);
+
+        if (playerSpriteImage != null && playerCreature != null)
+        {
+            if (playerSprite != null)
+            {
+                playerSpriteImage.sprite = playerSprite;
+                playerSpriteImage.preserveAspect = true;
+                float scale = ResolveBattleSpriteScale(playerCreature, playerSprite);
+                playerSpriteBaseLocalScale = new Vector3(-scale, scale, 1f);
+                playerSpriteImage.rectTransform.localScale = playerSpriteBaseLocalScale;
+                playerSpriteImage.color = Color.white;
+            }
+            else
+            {
+                playerSpriteImage.sprite = null;
+                playerSpriteImage.color = Color.clear;
+                playerSpriteBaseLocalScale = Vector3.one;
+            }
+        }
+
+        if (enemySpriteImage != null && enemyCreature != null)
+        {
+            if (enemySprite != null)
+            {
+                enemySpriteImage.sprite = enemySprite;
+                enemySpriteImage.preserveAspect = true;
+                float scale = ResolveBattleSpriteScale(enemyCreature, enemySprite);
+                enemySpriteBaseLocalScale = new Vector3(scale, scale, 1f);
+                enemySpriteImage.rectTransform.localScale = enemySpriteBaseLocalScale;
+                enemySpriteImage.color = Color.white;
+            }
+            else
+            {
+                enemySpriteImage.sprite = null;
+                enemySpriteImage.color = Color.clear;
+                enemySpriteBaseLocalScale = Vector3.one;
+            }
+        }
+    }
+
+    Sprite ResolveCombatantSprite(CreatureCombatant combatant, bool isPlayer)
+    {
+        if (combatant == null) return null;
+
+        SpriteRenderer sr = combatant.GetComponent<SpriteRenderer>();
+        if (sr == null)
+        {
+            sr = combatant.GetComponentInChildren<SpriteRenderer>(true);
+        }
+        if (sr != null && sr.sprite != null)
+        {
+            return sr.sprite;
+        }
+
+        if (!isPlayer && currentEnemyAI != null)
+        {
+            SpriteRenderer aiSr = currentEnemyAI.GetComponent<SpriteRenderer>();
+            if (aiSr == null) aiSr = currentEnemyAI.GetComponentInChildren<SpriteRenderer>(true);
+            if (aiSr != null && aiSr.sprite != null) return aiSr.sprite;
+        }
+
+        string creatureId = ResolveCreatureID(combatant.gameObject, combatant);
+        return TryLoadCreatureSprite(creatureId);
+    }
+
+    float ResolveBattleSpriteScale(CreatureCombatant combatant, Sprite sprite)
+    {
+        float idScale = 1f;
+        string creatureId = ResolveCreatureID(combatant != null ? combatant.gameObject : null, combatant);
+        string key = CanonicalizeCreatureID(creatureId);
+
+        if (key.Contains("whelpling") || key.Contains("ashcub") || key.Contains("strikeling"))
+        {
+            idScale = 0.9f;
+        }
+        else if (key.Contains("emberclaw") || key.Contains("frostcharge"))
+        {
+            idScale = 1.0f;
+        }
+        else if (key.Contains("voidmane") || key.Contains("galecrown"))
+        {
+            idScale = 1.15f;
+        }
+        else if (key.Contains("solnox") || key.Contains("zypheron"))
+        {
+            idScale = 1.3f;
+        }
+
+        float spriteScale = 1f;
+        if (sprite != null)
+        {
+            float area = Mathf.Max(1f, sprite.rect.width * sprite.rect.height);
+            float normalized = Mathf.Sqrt(area / (512f * 512f));
+            spriteScale = Mathf.Clamp(normalized, 0.78f, 1.35f);
+        }
+
+        return Mathf.Clamp(idScale * spriteScale, 0.72f, 1.45f);
+    }
+
+    void EnsureMessagePresentation()
+    {
+        if (messageText == null) return;
+        if (messageText.font == null) messageText.font = GetDefaultUIFont();
+
+        messageText.alignment = TextAnchor.MiddleCenter;
+        messageText.fontSize = 40;
+        messageText.fontStyle = FontStyle.Bold;
+        messageText.color = Color.white;
+        messageText.raycastTarget = false;
+        messageText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        messageText.verticalOverflow = VerticalWrapMode.Overflow;
+
+        RectTransform rt = messageText.rectTransform;
+        if (rt != null)
+        {
+            rt.anchorMin = new Vector2(0.5f, 1f);
+            rt.anchorMax = new Vector2(0.5f, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = new Vector2(0f, -24f);
+            rt.sizeDelta = new Vector2(980f, 96f);
+        }
+
+        Outline outline = messageText.GetComponent<Outline>();
+        if (outline == null) outline = messageText.gameObject.AddComponent<Outline>();
+        outline.effectColor = new Color(0f, 0f, 0f, 1f);
+        outline.effectDistance = new Vector2(2f, -2f);
+    }
+
+    Font GetDefaultUIFont()
+    {
+        if (cachedDefaultFont != null) return cachedDefaultFont;
+        // Unity versions differ on built-in font availability; resolve safely.
+        cachedDefaultFont = TryGetBuiltinFont("LegacyRuntime.ttf");
+        if (cachedDefaultFont == null)
+        {
+            cachedDefaultFont = TryGetBuiltinFont("Arial.ttf");
+        }
+        if (cachedDefaultFont == null)
+        {
+            cachedDefaultFont = FindFirstObjectByType<Font>();
+        }
+        return cachedDefaultFont;
+    }
+
+    Font TryGetBuiltinFont(string resourceName)
+    {
+        if (string.IsNullOrEmpty(resourceName)) return null;
+        try
+        {
+            return Resources.GetBuiltinResource<Font>(resourceName);
+        }
+        catch (System.Exception)
+        {
+            return null;
+        }
+    }
+
+    void EnsureBattleRuntimeState()
+    {
+        if (!inBattle) return;
+        AutoFindUI();
+        if (battleRoot == null) return;
+
+        // If any external script deactivates UI during battle, force it back on.
+        bool reactivatedHierarchy = false;
+        Transform p = battleRoot.transform.parent;
+        while (p != null)
+        {
+            if (!p.gameObject.activeSelf)
+            {
+                p.gameObject.SetActive(true);
+                reactivatedHierarchy = true;
+            }
+            p = p.parent;
+        }
+
+        if (!battleRoot.activeSelf)
+        {
+            battleRoot.SetActive(true);
+            reactivatedHierarchy = true;
+        }
+
+        Vector2Int currentScreenSize = new Vector2Int(Screen.width, Screen.height);
+        bool screenSizeChanged = currentScreenSize != lastLayoutScreenSize;
+        if (!runtimeLayoutInitialized || screenSizeChanged || reactivatedHierarchy)
+        {
+            ApplyEncounterLayout();
+            HookButtons();
+            runtimeLayoutInitialized = true;
+            lastLayoutScreenSize = currentScreenSize;
+        }
+
+        if (!IsValidCombatant(playerCreature))
+        {
+            playerCreature = ResolvePlayerCombatant();
+        }
+        if (!IsValidCombatant(enemyCreature))
+        {
+            enemyCreature = ResolveEnemyCombatant(currentEnemyAI);
+        }
+
+        EnsureButtonLabels();
+        EnsureBackButton();
+        ApplyButtonSkins();
+        UpdateCreatureSprites();
+        ApplyCreatureIdleAnimation();
+        UpdateUI();
+
+        if (currentEnemyAI != null && !currentEnemyAI.IsInBattle())
+        {
+            currentEnemyAI.EnterBattle();
+            currentEnemyAI.ForceStop();
+        }
+
+        if (playerMover != null && playerMover.enabled)
+        {
+            playerMover.enabled = false;
+        }
+
+        RefreshTurnInputState();
+    }
+
+    void RefreshTurnInputState()
+    {
+        bool allowInput = inBattle && waitingForPlayerMove;
+        bool hasPlayerCreature = IsValidCombatant(playerCreature);
+
+        if (attackButton != null) attackButton.interactable = allowInput && hasPlayerCreature;
+        if (swapButton != null) swapButton.interactable = allowInput;
+        if (captureButton != null) captureButton.interactable = allowInput;
+        if (runButton != null) runButton.interactable = allowInput;
+        UpdateButtonVisualState(attackButton);
+        UpdateButtonVisualState(swapButton);
+        UpdateButtonVisualState(captureButton);
+        UpdateButtonVisualState(runButton);
+
+        if (moveButtons != null)
+        {
+            for (int i = 0; i < moveButtons.Length; i++)
+            {
+                if (moveButtons[i] == null) continue;
+                if (playerCreature == null)
+                {
+                    moveButtons[i].interactable = false;
+                    UpdateButtonVisualState(moveButtons[i]);
+                    continue;
+                }
+
+                int unlockLevel = 1 + i * 5;
+                bool unlocked = playerCreature.level >= unlockLevel;
+                moveButtons[i].interactable = allowInput && unlocked;
+                UpdateButtonVisualState(moveButtons[i]);
+            }
+        }
+
+        if (backButton != null)
+        {
+            bool canBack = inBattle && movePanel != null && movePanel.activeSelf;
+            backButton.interactable = canBack;
+            UpdateButtonVisualState(backButton);
+        }
+    }
+
+    void UpdateButtonVisualState(Button button)
+    {
+        if (button == null) return;
+        Image image = button.GetComponent<Image>();
+        if (image != null)
+        {
+            image.color = button.interactable
+                ? Color.white
+                : new Color(0.55f, 0.55f, 0.55f, 1f);
+        }
+
+        Text[] labels = button.GetComponentsInChildren<Text>(true);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            Text label = labels[i];
+            if (label == null) continue;
+            if (button == backButton)
+            {
+                label.color = button.interactable
+                    ? new Color(0.08f, 0.08f, 0.10f, 1f)
+                    : new Color(0.40f, 0.40f, 0.42f, 1f);
+            }
+            else
+            {
+                label.color = button.interactable
+                    ? Color.white
+                    : new Color(0.82f, 0.82f, 0.82f, 1f);
+            }
+        }
+    }
+
+    void ApplyCreatureIdleAnimation()
+    {
+        float t = Time.unscaledTime;
+
+        if (playerSpriteImage != null && playerSpriteImage.sprite != null && !activeAttackAnimations.Contains(playerSpriteImage))
+        {
+            float breathe = (Mathf.Sin(t * 1.9f + 0.15f) + 1f) * 0.5f;
+            float ySquash = 1f - (breathe * 0.05f);
+            float xStretch = 1f + (breathe * 0.025f);
+            playerSpriteImage.rectTransform.localPosition = playerSpriteBaseLocalPos;
+            Vector3 baseScale = playerSpriteBaseLocalScale;
+            playerSpriteImage.rectTransform.localScale = new Vector3(baseScale.x * xStretch, baseScale.y * ySquash, baseScale.z);
+            if (playerShadowImage != null)
+            {
+                float shadowPulse = 1f + (breathe * 0.05f);
+                playerShadowImage.rectTransform.localScale = new Vector3(shadowPulse, 1f, 1f);
+            }
+        }
+
+        if (enemySpriteImage != null && enemySpriteImage.sprite != null && !activeAttackAnimations.Contains(enemySpriteImage))
+        {
+            float breathe = (Mathf.Sin(t * 1.9f + 1.1f) + 1f) * 0.5f;
+            float ySquash = 1f - (breathe * 0.05f);
+            float xStretch = 1f + (breathe * 0.025f);
+            enemySpriteImage.rectTransform.localPosition = enemySpriteBaseLocalPos;
+            Vector3 baseScale = enemySpriteBaseLocalScale;
+            enemySpriteImage.rectTransform.localScale = new Vector3(baseScale.x * xStretch, baseScale.y * ySquash, baseScale.z);
+            if (enemyShadowImage != null)
+            {
+                float shadowPulse = 1f + (breathe * 0.05f);
+                enemyShadowImage.rectTransform.localScale = new Vector3(shadowPulse, 1f, 1f);
+            }
+        }
+    }
+
+    void SetMessage(string msg)
+    {
+        if (messageText != null) messageText.text = msg;
+    }
+
+    void ConfigureCombatantByCreatureID(CreatureCombatant combatant, string creatureID, int level, bool resetHpToFull)
+    {
+        if (combatant == null) return;
+
+        int lvl = Mathf.Max(1, level);
+        string id = NormalizeCreatureID(creatureID);
+        if (string.IsNullOrWhiteSpace(id)) id = "whelpling";
+
+        combatant.autoInitWhelpling = false;
+        combatant.InitWhelpling(lvl);
+
+        if (id == "ashcub" || id == "emberclaw" || id == "voidmane" || id == "solnoxeternal" || id == "solnoxtheeternal")
+        {
+            combatant.creatureName = ToDisplayName(creatureID, "Ashcub");
+            combatant.types = new[] { CreatureType.Light, CreatureType.Dark, CreatureType.Dragon };
+        }
+        else if (id == "strikeling" || id == "frostcharge" || id == "galecrown" || id == "zypheronunyielding" || id == "zypherontheunyielding")
+        {
+            combatant.creatureName = ToDisplayName(creatureID, "Strikeling");
+            combatant.types = new[] { CreatureType.Lightning, CreatureType.Ice, CreatureType.Dragon };
+        }
+        else
+        {
+            combatant.creatureName = ToDisplayName(creatureID, "Whelpling");
+            combatant.types = new[] { CreatureType.Dragon, CreatureType.Water, CreatureType.Fire };
+        }
+
+        combatant.level = lvl;
+        if (combatant.maxHP < 1) combatant.maxHP = 1;
+        if (resetHpToFull || combatant.currentHP <= 0 || combatant.currentHP > combatant.maxHP)
+        {
+            combatant.currentHP = combatant.maxHP;
+        }
+    }
+
+    string ResolveCreatureID(GameObject go, CreatureCombatant fallbackCombatant)
+    {
+        if (go != null)
+        {
+            WorldSpawnMarker marker = go.GetComponent<WorldSpawnMarker>();
+            if (marker == null) marker = go.GetComponentInParent<WorldSpawnMarker>();
+            if (marker != null && !string.IsNullOrWhiteSpace(marker.creatureID))
+            {
+                return CanonicalizeCreatureID(marker.creatureID);
+            }
+        }
+
+        string visualId = TryInferCreatureIDFromVisual(go);
+        if (!string.IsNullOrWhiteSpace(visualId))
+        {
+            return CanonicalizeCreatureID(visualId);
+        }
+
+        if (go != null)
+        {
+            string n = go.name;
+            if (!string.IsNullOrWhiteSpace(n))
+            {
+                n = n
+                    .Replace("Wild_", "")
+                    .Replace("EncounterEnemy_", "")
+                    .Replace("(Clone)", "")
+                    .Trim();
+                if (!string.IsNullOrWhiteSpace(n))
+                {
+                    return CanonicalizeCreatureID(n);
+                }
+            }
+        }
+
+        if (fallbackCombatant != null && !string.IsNullOrWhiteSpace(fallbackCombatant.creatureName))
+        {
+            return CanonicalizeCreatureID(fallbackCombatant.creatureName);
+        }
+
+        return "whelpling";
+    }
+
+    string NormalizeCreatureID(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return string.Empty;
+        return id.Trim().Replace(" ", "").Replace("_", "").ToLowerInvariant();
+    }
+
+    string CanonicalizeCreatureID(string id)
+    {
+        string key = NormalizeCreatureID(id);
+        if (string.IsNullOrWhiteSpace(key)) return "whelpling";
+
+        if (key.Contains("ashcub") || key.Contains("emberclaw") || key.Contains("voidmane") || key.Contains("solnox"))
+        {
+            return key;
+        }
+        if (key.Contains("strikeling") || key.Contains("frostcharge") || key.Contains("galecrown") || key.Contains("zypheron"))
+        {
+            return key;
+        }
+        if (key.Contains("frog") || key.Contains("whelpling"))
+        {
+            return "whelpling";
+        }
+
+        return key;
+    }
+
+    string TryInferCreatureIDFromVisual(GameObject go)
+    {
+        if (go == null) return string.Empty;
+
+        SpriteFromTexture sft = go.GetComponent<SpriteFromTexture>();
+        if (sft == null) sft = go.GetComponentInChildren<SpriteFromTexture>(true);
+        if (sft != null && sft.texture != null && !string.IsNullOrWhiteSpace(sft.texture.name))
+        {
+            return sft.texture.name;
+        }
+
+        SpriteRenderer sr = go.GetComponent<SpriteRenderer>();
+        if (sr == null) sr = go.GetComponentInChildren<SpriteRenderer>(true);
+        if (sr != null && sr.sprite != null)
+        {
+            if (!string.IsNullOrWhiteSpace(sr.sprite.name))
+            {
+                return sr.sprite.name;
+            }
+            if (sr.sprite.texture != null && !string.IsNullOrWhiteSpace(sr.sprite.texture.name))
+            {
+                return sr.sprite.texture.name;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    string ToDisplayName(string id, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return fallback;
+        string cleaned = id.Trim().Replace("_", " ");
+        if (cleaned.Length == 0) return fallback;
+        if (cleaned.Length == 1) return cleaned.ToUpperInvariant();
+        return char.ToUpperInvariant(cleaned[0]) + cleaned.Substring(1);
+    }
+
+    Sprite TryLoadCreatureSprite(string creatureID)
+    {
+        string key = CanonicalizeCreatureID(creatureID);
+        if (string.IsNullOrEmpty(key)) key = "whelpling";
+        if (creatureSpriteCache.TryGetValue(key, out Sprite cached))
+        {
+            return cached;
+        }
+
+        string[] names = BuildCreatureNameCandidates(key);
+        for (int i = 0; i < names.Length; i++)
+        {
+            string n = names[i];
+            Sprite s = Resources.Load<Sprite>("Creatures/" + n);
+            if (s != null)
+            {
+                creatureSpriteCache[key] = s;
+                return s;
+            }
+        }
+
+        Sprite[] allSprites = Resources.LoadAll<Sprite>("Creatures");
+        for (int i = 0; i < allSprites.Length; i++)
+        {
+            Sprite s = allSprites[i];
+            if (s == null) continue;
+            string spriteKey = NormalizeCreatureID(s.name);
+            if (spriteKey == key)
+            {
+                creatureSpriteCache[key] = s;
+                return s;
+            }
+            if (s.texture != null && NormalizeCreatureID(s.texture.name) == key)
+            {
+                creatureSpriteCache[key] = s;
+                return s;
+            }
+        }
+
+#if UNITY_EDITOR
+        string[] roots = { "Assets/Creatures", "Assets/Resources/Creatures" };
+        for (int r = 0; r < roots.Length; r++)
+        {
+            if (!AssetDatabase.IsValidFolder(roots[r])) continue;
+            string[] spriteGuids = AssetDatabase.FindAssets("t:Sprite", new[] { roots[r] });
+            for (int i = 0; i < spriteGuids.Length; i++)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(spriteGuids[i]);
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                string fileName = System.IO.Path.GetFileNameWithoutExtension(path);
+                if (NormalizeCreatureID(fileName) != key) continue;
+
+                Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                if (sprite != null)
+                {
+                    creatureSpriteCache[key] = sprite;
+                    return sprite;
+                }
+            }
+
+            string[] textureGuids = AssetDatabase.FindAssets("t:Texture2D", new[] { roots[r] });
+            for (int i = 0; i < textureGuids.Length; i++)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(textureGuids[i]);
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                string fileName = System.IO.Path.GetFileNameWithoutExtension(path);
+                if (NormalizeCreatureID(fileName) != key) continue;
+
+                Texture2D tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                if (tex != null)
+                {
+                    Sprite runtime = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 128f);
+                    runtime.name = fileName;
+                    creatureSpriteCache[key] = runtime;
+                    return runtime;
+                }
+            }
+        }
+#endif
+        return null;
+    }
+
+    string[] BuildCreatureNameCandidates(string creatureID)
+    {
+        if (string.IsNullOrWhiteSpace(creatureID)) return new[] { "whelpling", "Whelpling" };
+        string raw = creatureID.Trim();
+        string lower = raw.ToLowerInvariant();
+        string title = char.ToUpperInvariant(raw[0]) + raw.Substring(1);
+        string noUnderscore = raw.Replace("_", " ");
+        return new[] { raw, lower, title, noUnderscore };
+    }
+}
