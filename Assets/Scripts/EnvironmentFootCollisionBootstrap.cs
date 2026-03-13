@@ -107,6 +107,11 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
 
             marker.obstacleKind = obstacleKind;
 
+            if (obstacleKind == "House")
+            {
+                EnsureHouseFadeable(sr);
+            }
+
             Bounds spriteBounds = sr.sprite.bounds;
             float footWidth = Mathf.Max(0.08f, spriteBounds.size.x * widthRatio);
             float footHeight = Mathf.Max(0.08f, spriteBounds.size.y * heightRatio);
@@ -211,6 +216,14 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
             return true;
         }
 
+        if (n.Contains("house") || n.Contains("hut") || n.Contains("building"))
+        {
+            obstacleKind = "House";
+            widthRatio = 0.62f;
+            heightRatio = 0.14f;
+            return true;
+        }
+
         return false;
     }
 
@@ -222,6 +235,7 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         if (sr.GetComponentInParent<Follower>() != null) return true;
         if (sr.GetComponentInParent<BattleSystem>() != null) return true;
         if (IsChildOfTreeRootWithCollider(sr)) return true;
+        if (IsChildOfHouseRootWithCollider(sr)) return true;
         return false;
     }
 
@@ -238,5 +252,35 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
         // Tree prefabs use a root-level collider. Do not add duplicate colliders
         // to layered child sprite parts like Upper/Lower/Shadow.
         return root.GetComponent<BoxCollider2D>() != null;
+    }
+
+    private static bool IsChildOfHouseRootWithCollider(SpriteRenderer sr)
+    {
+        if (sr == null) return false;
+        Transform t = sr.transform;
+        if (t.parent == null) return false;
+
+        Transform root = t.root;
+        if (root == null || root == t) return false;
+        if (!root.name.ToLowerInvariant().Contains("house")) return false;
+
+        return root.GetComponent<BoxCollider2D>() != null;
+    }
+
+    private static void EnsureHouseFadeable(SpriteRenderer sr)
+    {
+        if (sr == null) return;
+
+        // For layered house art, keep fade control at the root if it is named like a house.
+        Transform t = sr.transform;
+        Transform root = t.root;
+        GameObject target = (root != null && root.name.ToLowerInvariant().Contains("house"))
+            ? root.gameObject
+            : sr.gameObject;
+
+        if (target.GetComponent<FadeableSprite>() == null)
+        {
+            target.AddComponent<FadeableSprite>();
+        }
     }
 }
