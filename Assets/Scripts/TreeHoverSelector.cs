@@ -709,7 +709,7 @@ public class TreeHoverSelector : MonoBehaviour
             Mathf.Max(0.02f, woodDropFallDurationMin),
             Mathf.Max(Mathf.Max(0.02f, woodDropFallDurationMin), woodDropFallDurationMax));
 
-        Vector3 dropScale = Vector3.one * Mathf.Max(0.01f, woodDropScale);
+        Vector3 dropScale = Vector3.one * Mathf.Max(0.01f, woodDropScale * 2f);
         drop.transform.localScale = dropScale;
 
         woodDrops.Add(new WoodDropEntry
