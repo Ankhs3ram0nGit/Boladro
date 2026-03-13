@@ -47,7 +47,21 @@ public class TreeHoverSelector : MonoBehaviour
     public int woodDropAmount = 1;
     public string woodSpriteAssetPath = "Assets/Resources/Wood.png";
     public float woodDropYOffset = 0.12f;
-    public float woodPickupDistance = 1.2f;
+    public float woodPickupDistance = 1f;
+    [Range(0.01f, 1f)] public float woodDropScale = 0.1f;
+    public float woodDropFallDistanceMin = 0.28f;
+    public float woodDropFallDistanceMax = 0.68f;
+    public float woodDropFallDurationMin = 0.14f;
+    public float woodDropFallDurationMax = 0.26f;
+    public float woodDropArcHeight = 0.16f;
+
+    [Header("Wood Collect Animation")]
+    public float woodCollectMoveDuration = 0.18f;
+    public float woodCollectExpandDuration = 0.08f;
+    public float woodCollectShrinkDuration = 0.10f;
+    public float woodCollectExpandScale = 1.35f;
+    public float woodCollectTargetYOffset = 0.45f;
+    public int woodCollectSortingBoost = 60;
 
     class TreeEntry
     {
@@ -60,6 +74,18 @@ public class TreeHoverSelector : MonoBehaviour
         public Transform root;
         public SpriteRenderer renderer;
         public int amount;
+        public Vector3 baseScale;
+        public int baseSortingLayerId;
+        public int baseSortingOrder;
+        public Vector3 fallStart;
+        public Vector3 fallTarget;
+        public float fallDuration;
+        public float fallElapsed;
+        public bool isFalling;
+        public Vector3 collectStart;
+        public Vector3 collectTarget;
+        public float collectElapsed;
+        public bool isCollecting;
     }
 
     struct TreeSquashState
@@ -88,6 +114,7 @@ public class TreeHoverSelector : MonoBehaviour
     private Sprite cachedWoodSprite;
     private InventoryModel inventory;
     private InventoryItemData runtimeWoodItem;
+    private SpriteRenderer playerSpriteRenderer;
 
     void Awake()
     {
@@ -124,6 +151,7 @@ public class TreeHoverSelector : MonoBehaviour
     {
         if (toolController == null) toolController = GetComponent<PlayerToolController>();
         if (inventory == null) inventory = GetComponent<InventoryModel>();
+        if (playerSpriteRenderer == null) playerSpriteRenderer = GetComponent<SpriteRenderer>();
         if (toolController != boundToolController) BindToolController(toolController);
         if (mainCam == null) mainCam = Camera.main;
         if (grid == null) grid = FindFirstObjectByType<Grid>();
@@ -672,11 +700,33 @@ public class TreeHoverSelector : MonoBehaviour
         if (hasLayer) sr.sortingLayerID = sortingLayerId;
         sr.sortingOrder = highestOrder + 2;
 
+        float side = Random.value < 0.5f ? -1f : 1f;
+        float sideDistance = Random.Range(
+            Mathf.Max(0.01f, woodDropFallDistanceMin),
+            Mathf.Max(Mathf.Max(0.01f, woodDropFallDistanceMin), woodDropFallDistanceMax));
+        Vector3 fallTarget = worldPos + new Vector3(side * sideDistance, Random.Range(-0.04f, 0.08f), 0f);
+        float fallDuration = Random.Range(
+            Mathf.Max(0.02f, woodDropFallDurationMin),
+            Mathf.Max(Mathf.Max(0.02f, woodDropFallDurationMin), woodDropFallDurationMax));
+
+        Vector3 dropScale = Vector3.one * Mathf.Max(0.01f, woodDropScale);
+        drop.transform.localScale = dropScale;
+
         woodDrops.Add(new WoodDropEntry
         {
             root = drop.transform,
             renderer = sr,
-            amount = Mathf.Max(1, woodDropAmount)
+            amount = Mathf.Max(1, woodDropAmount),
+            baseScale = dropScale,
+            baseSortingLayerId = sr.sortingLayerID,
+            baseSortingOrder = sr.sortingOrder,
+            fallStart = worldPos,
+            fallTarget = fallTarget,
+            fallDuration = fallDuration,
+            fallElapsed = 0f,
+            isFalling = true,
+            collectElapsed = 0f,
+            isCollecting = false
         });
     }
 
@@ -707,6 +757,23 @@ public class TreeHoverSelector : MonoBehaviour
                 continue;
             }
 
+            if (drop.isCollecting)
+            {
+                bool done = UpdateWoodDropCollectAnimation(drop);
+                if (done)
+                {
+                    if (drop.root != null) Destroy(drop.root.gameObject);
+                    woodDrops.RemoveAt(i);
+                }
+                continue;
+            }
+
+            if (drop.isFalling)
+            {
+                UpdateWoodDropFalling(drop);
+                continue;
+            }
+
             bool nearPlayer = Vector2.Distance(
                 new Vector2(transform.position.x, transform.position.y),
                 new Vector2(drop.root.position.x, drop.root.position.y))
@@ -720,10 +787,107 @@ public class TreeHoverSelector : MonoBehaviour
 
             if (!nearPlayer && !hovered) continue;
             if (!TryPickupWood(drop)) continue;
-
-            if (drop.root != null) Destroy(drop.root.gameObject);
-            woodDrops.RemoveAt(i);
+            StartWoodDropCollectAnimation(drop);
         }
+    }
+
+    void UpdateWoodDropFalling(WoodDropEntry drop)
+    {
+        if (drop == null || drop.root == null) return;
+
+        drop.fallElapsed += Time.deltaTime;
+        float t = Mathf.Clamp01(drop.fallDuration > 0.0001f ? drop.fallElapsed / drop.fallDuration : 1f);
+        float eased = t * t * (3f - (2f * t));
+        Vector3 pos = Vector3.Lerp(drop.fallStart, drop.fallTarget, eased);
+        pos.y += Mathf.Sin(t * Mathf.PI) * Mathf.Max(0f, woodDropArcHeight);
+        drop.root.position = pos;
+
+        if (t < 1f) return;
+
+        drop.root.position = drop.fallTarget;
+        drop.root.localScale = drop.baseScale;
+        drop.isFalling = false;
+    }
+
+    void StartWoodDropCollectAnimation(WoodDropEntry drop)
+    {
+        if (drop == null || drop.root == null || drop.renderer == null) return;
+
+        drop.isCollecting = true;
+        drop.collectElapsed = 0f;
+        drop.collectStart = drop.root.position;
+        drop.collectTarget = ResolveCurrentWoodCollectTarget(drop);
+        SetWoodDropCollectSorting(drop);
+    }
+
+    bool UpdateWoodDropCollectAnimation(WoodDropEntry drop)
+    {
+        if (drop == null || drop.root == null || drop.renderer == null) return true;
+
+        float moveDuration = Mathf.Max(0.01f, woodCollectMoveDuration);
+        float expandDuration = Mathf.Max(0.01f, woodCollectExpandDuration);
+        float shrinkDuration = Mathf.Max(0.01f, woodCollectShrinkDuration);
+        float expandScale = Mathf.Max(1f, woodCollectExpandScale);
+
+        drop.collectElapsed += Time.deltaTime;
+        float t = drop.collectElapsed;
+
+        drop.collectTarget = ResolveCurrentWoodCollectTarget(drop);
+        SetWoodDropCollectSorting(drop);
+
+        if (t <= moveDuration)
+        {
+            float u = t / moveDuration;
+            float eased = 1f - Mathf.Pow(1f - u, 3f);
+            drop.root.position = Vector3.Lerp(drop.collectStart, drop.collectTarget, eased);
+            drop.root.localScale = drop.baseScale;
+            return false;
+        }
+
+        drop.root.position = drop.collectTarget;
+        t -= moveDuration;
+        if (t <= expandDuration)
+        {
+            float u = t / expandDuration;
+            float s = Mathf.Lerp(1f, expandScale, u);
+            drop.root.localScale = drop.baseScale * s;
+            return false;
+        }
+
+        t -= expandDuration;
+        if (t <= shrinkDuration)
+        {
+            float u = t / shrinkDuration;
+            float s = Mathf.Lerp(expandScale, 0f, u);
+            drop.root.localScale = drop.baseScale * s;
+            return false;
+        }
+
+        return true;
+    }
+
+    Vector3 ResolveCurrentWoodCollectTarget(WoodDropEntry drop)
+    {
+        float z = drop != null && drop.root != null ? drop.root.position.z : 0f;
+        return new Vector3(
+            transform.position.x,
+            transform.position.y + woodCollectTargetYOffset,
+            z);
+    }
+
+    void SetWoodDropCollectSorting(WoodDropEntry drop)
+    {
+        if (drop == null || drop.renderer == null) return;
+
+        if (playerSpriteRenderer != null)
+        {
+            drop.renderer.sortingLayerID = playerSpriteRenderer.sortingLayerID;
+            drop.renderer.sortingOrder = playerSpriteRenderer.sortingOrder + Mathf.Max(1, woodCollectSortingBoost);
+            return;
+        }
+
+        drop.renderer.sortingLayerID = drop.baseSortingLayerId;
+        drop.renderer.sortingOrder = drop.baseSortingOrder + Mathf.Max(1, woodCollectSortingBoost);
     }
 
     bool TryPickupWood(WoodDropEntry drop)
