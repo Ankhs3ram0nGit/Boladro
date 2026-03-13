@@ -98,6 +98,13 @@ public class SpawnSystemRuntimeBootstrap : MonoBehaviour
             spawner = manager.gameObject.AddComponent<OverworldCreatureSpawner>();
         }
         if (spawner != null) spawner.enabled = true;
+
+        WorldRockSpriteNormalizer rockNormalizer = manager.GetComponent<WorldRockSpriteNormalizer>();
+        if (rockNormalizer == null)
+        {
+            rockNormalizer = manager.gameObject.AddComponent<WorldRockSpriteNormalizer>();
+        }
+        if (rockNormalizer != null) rockNormalizer.enabled = true;
     }
 
     static SpawnZone CreateDefaultZone(Tilemap ground, AreaSpawnConfig configuredZoneConfig)

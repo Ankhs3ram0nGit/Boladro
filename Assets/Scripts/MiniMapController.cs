@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using System.Collections.Generic;
 
 [DisallowMultipleComponent]
 public class MiniMapController : MonoBehaviour
@@ -22,17 +23,36 @@ public class MiniMapController : MonoBehaviour
     public Color markerOuterColor = Color.black;
     public Color markerInnerColor = Color.white;
 
+    [Header("Creature Blips")]
+    public float creatureBlipSize = 18f;
+    [Min(0.1f)] public float creatureScanInterval = 0.45f;
+    public Color creatureBlipTint = Color.white;
+
     private const string RootName = "__MiniMapUI";
     private const string CameraName = "__MiniMapCamera";
 
     private Camera minimapCamera;
     private RenderTexture minimapTexture;
     private RectTransform rootRect;
+    private RectTransform mapRectTransform;
+    private RectTransform creatureBlipRoot;
     private RawImage mapImage;
     private bool initialized;
     private bool createdCanvasAtRuntime;
     private Canvas canvas;
     private Sprite circleSprite;
+    private float nextCreatureScanAt;
+
+    private class CreatureBlip
+    {
+        public int key;
+        public Transform target;
+        public SpriteRenderer sourceRenderer;
+        public Image image;
+    }
+
+    private readonly Dictionary<int, CreatureBlip> creatureBlips = new Dictionary<int, CreatureBlip>();
+    private readonly List<int> staleCreatureKeys = new List<int>();
 
     void OnEnable()
     {
@@ -49,6 +69,7 @@ public class MiniMapController : MonoBehaviour
         if (minimapCamera == null) return;
         Vector3 p = transform.position;
         minimapCamera.transform.position = new Vector3(p.x, p.y, minimapCameraZ);
+        UpdateCreatureBlips();
     }
 
     void OnDestroy()
@@ -191,8 +212,152 @@ public class MiniMapController : MonoBehaviour
         mapImage.texture = minimapTexture;
         mapImage.color = Color.white;
         mapImage.raycastTarget = false;
+        mapRectTransform = mapRect;
+        EnsureCreatureBlipLayer(mapRectTransform);
 
         EnsurePlayerMarker(rootRect);
+    }
+
+    void EnsureCreatureBlipLayer(RectTransform mapRect)
+    {
+        if (mapRect == null) return;
+        Transform t = mapRect.Find("CreatureBlips");
+        if (t == null)
+        {
+            GameObject go = new GameObject("CreatureBlips");
+            creatureBlipRoot = go.AddComponent<RectTransform>();
+            go.transform.SetParent(mapRect, false);
+        }
+        else
+        {
+            creatureBlipRoot = t.GetComponent<RectTransform>();
+            if (creatureBlipRoot == null) creatureBlipRoot = t.gameObject.AddComponent<RectTransform>();
+        }
+
+        creatureBlipRoot.anchorMin = Vector2.zero;
+        creatureBlipRoot.anchorMax = Vector2.one;
+        creatureBlipRoot.pivot = new Vector2(0.5f, 0.5f);
+        creatureBlipRoot.offsetMin = Vector2.zero;
+        creatureBlipRoot.offsetMax = Vector2.zero;
+    }
+
+    void UpdateCreatureBlips()
+    {
+        if (creatureBlipRoot == null || mapRectTransform == null) return;
+
+        if (Time.time >= nextCreatureScanAt)
+        {
+            nextCreatureScanAt = Time.time + Mathf.Max(0.1f, creatureScanInterval);
+            RefreshCreatureBlipTargets();
+        }
+
+        float halfHeight = Mathf.Max(0.01f, minimapOrthographicSize);
+        Rect rect = mapRectTransform.rect;
+        float mapAspect = Mathf.Max(0.01f, rect.width / Mathf.Max(1f, rect.height));
+        float halfWidth = halfHeight * mapAspect;
+        float halfUiW = rect.width * 0.5f;
+        float halfUiH = rect.height * 0.5f;
+        Vector2 playerPos = transform.position;
+
+        foreach (KeyValuePair<int, CreatureBlip> pair in creatureBlips)
+        {
+            CreatureBlip blip = pair.Value;
+            if (blip == null || blip.target == null || blip.image == null)
+            {
+                continue;
+            }
+
+            Vector2 delta = (Vector2)blip.target.position - playerPos;
+            bool visible = Mathf.Abs(delta.x) <= halfWidth && Mathf.Abs(delta.y) <= halfHeight;
+            blip.image.enabled = visible;
+            if (!visible) continue;
+
+            float nx = delta.x / halfWidth;
+            float ny = delta.y / halfHeight;
+            blip.image.rectTransform.anchoredPosition = new Vector2(nx * halfUiW, ny * halfUiH);
+            blip.image.rectTransform.sizeDelta = new Vector2(creatureBlipSize, creatureBlipSize);
+
+            Sprite source = blip.sourceRenderer != null ? blip.sourceRenderer.sprite : null;
+            if (source != null) blip.image.sprite = source;
+            blip.image.color = creatureBlipTint;
+        }
+    }
+
+    void RefreshCreatureBlipTargets()
+    {
+        staleCreatureKeys.Clear();
+        foreach (KeyValuePair<int, CreatureBlip> pair in creatureBlips)
+        {
+            staleCreatureKeys.Add(pair.Key);
+        }
+
+        WorldSpawnMarker[] markers = FindObjectsByType<WorldSpawnMarker>(FindObjectsSortMode.None);
+        for (int i = 0; i < markers.Length; i++)
+        {
+            WorldSpawnMarker marker = markers[i];
+            if (marker == null || marker.transform == null) continue;
+            if (!marker.gameObject.activeInHierarchy) continue;
+
+            int key = marker.GetInstanceID();
+            staleCreatureKeys.Remove(key);
+
+            if (!creatureBlips.TryGetValue(key, out CreatureBlip blip) || blip == null)
+            {
+                blip = CreateCreatureBlip(key);
+                creatureBlips[key] = blip;
+            }
+
+            blip.target = marker.transform;
+            if (blip.sourceRenderer == null)
+            {
+                blip.sourceRenderer = marker.GetComponent<SpriteRenderer>();
+                if (blip.sourceRenderer == null)
+                {
+                    blip.sourceRenderer = marker.GetComponentInChildren<SpriteRenderer>(true);
+                }
+            }
+            if (blip.sourceRenderer != null && blip.sourceRenderer.sprite != null)
+            {
+                blip.image.sprite = blip.sourceRenderer.sprite;
+            }
+        }
+
+        for (int i = 0; i < staleCreatureKeys.Count; i++)
+        {
+            int key = staleCreatureKeys[i];
+            if (!creatureBlips.TryGetValue(key, out CreatureBlip blip) || blip == null) continue;
+            if (blip.image != null)
+            {
+                if (Application.isPlaying) Destroy(blip.image.gameObject);
+                else DestroyImmediate(blip.image.gameObject);
+            }
+            creatureBlips.Remove(key);
+        }
+        staleCreatureKeys.Clear();
+    }
+
+    CreatureBlip CreateCreatureBlip(int key)
+    {
+        GameObject go = new GameObject("CreatureBlip_" + key);
+        RectTransform rt = go.AddComponent<RectTransform>();
+        go.transform.SetParent(creatureBlipRoot, false);
+        Image img = go.AddComponent<Image>();
+        img.raycastTarget = false;
+        img.preserveAspect = true;
+        img.sprite = GetCircleSprite();
+        img.color = creatureBlipTint;
+
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = Vector2.zero;
+        rt.sizeDelta = new Vector2(creatureBlipSize, creatureBlipSize);
+
+        return new CreatureBlip
+        {
+            key = key,
+            image = img
+        };
     }
 
     void EnsurePlayerMarker(RectTransform parent)
