@@ -27,7 +27,8 @@ public class TreeHoverSelector : MonoBehaviour
     public float fallbackTileWorldSize = 1f;
     public float selectorPadding = 1.08f;
     public bool includeInactiveTrees;
-    [Range(0f, 0.5f)] public float treeIgnoreBottomPortion = 0.12f;
+    [Range(0f, 0.8f)] public float treeInteractMinYNormalized = 0.12f;
+    [Range(0.2f, 1f)] public float treeInteractMaxYNormalized = 0.88f;
 
     [Header("Rendering")]
     public int sortingOrderBoost = 300;
@@ -652,7 +653,7 @@ public class TreeHoverSelector : MonoBehaviour
         {
             if (TryGetCombinedBoundsFiltered(entry.renderers, sr => !IsShadowRenderer(sr), out bounds))
             {
-                bounds = TrimBoundsBottomPortion(bounds, treeIgnoreBottomPortion);
+                bounds = TrimBoundsVerticalNormalized(bounds, treeInteractMinYNormalized, treeInteractMaxYNormalized);
                 return true;
             }
             return false;
@@ -661,14 +662,15 @@ public class TreeHoverSelector : MonoBehaviour
         return TryGetCombinedBounds(entry.renderers, out bounds);
     }
 
-    Bounds TrimBoundsBottomPortion(Bounds source, float ignoreBottomPortion)
+    Bounds TrimBoundsVerticalNormalized(Bounds source, float minYNormalized, float maxYNormalized)
     {
-        float cut = Mathf.Clamp(ignoreBottomPortion, 0f, 0.5f);
-        if (cut <= 0.0001f) return source;
+        float minN = Mathf.Clamp01(minYNormalized);
+        float maxN = Mathf.Clamp(maxYNormalized, minN + 0.05f, 1f);
+        if (minN <= 0.0001f && maxN >= 0.9999f) return source;
 
-        float remove = source.size.y * cut;
-        float h = Mathf.Max(0.0001f, source.size.y - remove);
-        float minY = source.min.y + remove;
+        float minY = Mathf.Lerp(source.min.y, source.max.y, minN);
+        float maxY = Mathf.Lerp(source.min.y, source.max.y, maxN);
+        float h = Mathf.Max(0.0001f, maxY - minY);
         float centerY = minY + (h * 0.5f);
 
         return new Bounds(
