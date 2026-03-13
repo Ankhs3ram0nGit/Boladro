@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -60,6 +61,7 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
     private static void ApplyFootColliders()
     {
         bool hasTemplate = TryGetTreeTemplateCollider(out Vector2 treeTemplateSize, out Vector2 treeTemplateOffset);
+        HashSet<int> processedHouseRoots = new HashSet<int>();
 
         SpriteRenderer[] renderers = FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None);
         for (int i = 0; i < renderers.Length; i++)
@@ -67,6 +69,12 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
             SpriteRenderer sr = renderers[i];
             if (sr == null || sr.sprite == null) continue;
             bool isObstacle = TryClassifyObstacle(sr, out string obstacleKind, out float widthRatio, out float heightRatio);
+
+            if (isObstacle && obstacleKind == "House")
+            {
+                ConfigureHouseObstacle(sr, processedHouseRoots);
+                continue;
+            }
 
             BoxCollider2D box = sr.GetComponent<BoxCollider2D>();
             FootColliderMarker marker = sr.GetComponent<FootColliderMarker>();
@@ -106,11 +114,6 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
             if (marker == null) marker = sr.gameObject.AddComponent<FootColliderMarker>();
 
             marker.obstacleKind = obstacleKind;
-
-            if (obstacleKind == "House")
-            {
-                EnsureHouseFadeable(sr);
-            }
 
             Bounds spriteBounds = sr.sprite.bounds;
             float footWidth = Mathf.Max(0.08f, spriteBounds.size.x * widthRatio);
@@ -262,25 +265,104 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
 
         Transform root = t.root;
         if (root == null || root == t) return false;
-        if (!root.name.ToLowerInvariant().Contains("house")) return false;
+        string rn = root.name.ToLowerInvariant();
+        if (!rn.Contains("house") && !rn.Contains("hut") && !rn.Contains("building")) return false;
 
         return root.GetComponent<BoxCollider2D>() != null;
     }
 
-    private static void EnsureHouseFadeable(SpriteRenderer sr)
+    private static void ConfigureHouseObstacle(SpriteRenderer sr, HashSet<int> processedRoots)
     {
         if (sr == null) return;
 
-        // For layered house art, keep fade control at the root if it is named like a house.
-        Transform t = sr.transform;
-        Transform root = t.root;
-        GameObject target = (root != null && root.name.ToLowerInvariant().Contains("house"))
-            ? root.gameObject
-            : sr.gameObject;
+        GameObject target = ResolveHouseRootObject(sr);
+        if (target == null) return;
+
+        int key = target.GetInstanceID();
+        if (processedRoots.Contains(key)) return;
+        processedRoots.Add(key);
 
         if (target.GetComponent<FadeableSprite>() == null)
         {
             target.AddComponent<FadeableSprite>();
         }
+        if (target.GetComponent<UseColliderOcclusionBounds>() == null)
+        {
+            target.AddComponent<UseColliderOcclusionBounds>();
+        }
+        if (target.GetComponent<TopDownSorter>() == null)
+        {
+            TopDownSorter sorter = target.AddComponent<TopDownSorter>();
+            sorter.sortMode = TopDownSorter.SortMode.RendererBottomY;
+        }
+
+        BoxCollider2D box = target.GetComponent<BoxCollider2D>();
+        if (box == null)
+        {
+            box = target.AddComponent<BoxCollider2D>();
+            InitializeHouseColliderFromSprites(target, box);
+        }
+
+        box.isTrigger = false;
+
+        FootColliderMarker marker = target.GetComponent<FootColliderMarker>();
+        if (marker == null) marker = target.AddComponent<FootColliderMarker>();
+        marker.obstacleKind = "House";
+    }
+
+    private static GameObject ResolveHouseRootObject(SpriteRenderer sr)
+    {
+        if (sr == null) return null;
+        Transform root = sr.transform.root;
+        if (root == null) return sr.gameObject;
+
+        string rn = root.name.ToLowerInvariant();
+        if (rn.Contains("house") || rn.Contains("hut") || rn.Contains("building"))
+        {
+            return root.gameObject;
+        }
+        return sr.gameObject;
+    }
+
+    private static void InitializeHouseColliderFromSprites(GameObject houseRoot, BoxCollider2D box)
+    {
+        if (houseRoot == null || box == null) return;
+
+        SpriteRenderer[] sprites = houseRoot.GetComponentsInChildren<SpriteRenderer>(true);
+        if (sprites == null || sprites.Length == 0) return;
+
+        bool hasBounds = false;
+        Bounds world = default;
+        for (int i = 0; i < sprites.Length; i++)
+        {
+            SpriteRenderer r = sprites[i];
+            if (r == null || r.sprite == null) continue;
+            string n = r.name.ToLowerInvariant();
+            if (n.Contains("shadow")) continue;
+            if (r.GetComponent<IgnoreOcclusionFade>() != null) continue;
+
+            if (!hasBounds)
+            {
+                world = r.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                world.Encapsulate(r.bounds);
+            }
+        }
+        if (!hasBounds) return;
+
+        float footWidthWorld = Mathf.Max(0.08f, world.size.x * 0.62f);
+        float footHeightWorld = Mathf.Max(0.08f, world.size.y * 0.14f);
+        float footCenterYWorld = world.min.y + (footHeightWorld * 0.5f);
+
+        Transform tr = houseRoot.transform;
+        Vector3 minLocal = tr.InverseTransformPoint(new Vector3(world.min.x, footCenterYWorld - (footHeightWorld * 0.5f), tr.position.z));
+        Vector3 maxLocal = tr.InverseTransformPoint(new Vector3(world.max.x, footCenterYWorld + (footHeightWorld * 0.5f), tr.position.z));
+        Vector3 centerLocal = tr.InverseTransformPoint(new Vector3(world.center.x, footCenterYWorld, tr.position.z));
+
+        box.size = new Vector2(Mathf.Abs(maxLocal.x - minLocal.x), Mathf.Abs(maxLocal.y - minLocal.y));
+        box.offset = new Vector2(centerLocal.x, centerLocal.y);
     }
 }

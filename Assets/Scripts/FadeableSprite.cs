@@ -60,6 +60,11 @@ public class FadeableSprite : MonoBehaviour
 
     public Bounds GetBounds()
     {
+        if (TryGetColliderOcclusionBounds(out Bounds colliderBounds))
+        {
+            return colliderBounds;
+        }
+
         if (renderers == null || renderers.Length == 0)
         {
             CacheRenderers();
@@ -111,5 +116,36 @@ public class FadeableSprite : MonoBehaviour
         }
 
         return b;
+    }
+
+    private bool TryGetColliderOcclusionBounds(out Bounds b)
+    {
+        b = default;
+        if (GetComponent<UseColliderOcclusionBounds>() == null) return false;
+
+        Collider2D[] cols = GetComponents<Collider2D>();
+        if (cols == null || cols.Length == 0)
+        {
+            cols = GetComponentsInChildren<Collider2D>(true);
+        }
+        if (cols == null || cols.Length == 0) return false;
+
+        bool has = false;
+        for (int i = 0; i < cols.Length; i++)
+        {
+            Collider2D c = cols[i];
+            if (c == null || !c.enabled) continue;
+            if (!has)
+            {
+                b = c.bounds;
+                has = true;
+            }
+            else
+            {
+                b.Encapsulate(c.bounds);
+            }
+        }
+
+        return has;
     }
 }
