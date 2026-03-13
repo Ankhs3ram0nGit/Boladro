@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -12,8 +13,9 @@ public class TreeHoverSelector : MonoBehaviour
 {
     private const string SelectorObjectName = "__HoverSelectorFX";
     private static readonly string[] SelectorFrameNames = { "Frame_0", "Frame_1", "Frame_2", "Frame_3" };
-    private const int FixedTreeMaxHealth = 100;
-    private const int FixedPickaxeTreeDamage = 10;
+
+    private const string DefaultStoneSpriteAssetPath = "Assets/Cainos/Pixel Art Top Down - Basic/Texture/TX Props.png";
+    private const string DefaultStoneSpriteName = "TX Props - Stone 06";
 
     [Header("Selector Source")]
     public string selectorAsepritePath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Aseprite/UI_FlatAnimated.aseprite";
@@ -44,9 +46,21 @@ public class TreeHoverSelector : MonoBehaviour
     [Header("Tree Harvest")]
     public int treeMaxHealth = 100;
     public int pickaxeDamageToTree = 10;
-    public int woodDropAmount = 1;
+    public int woodDropAmountMin = 10;
+    public int woodDropAmountMax = 20;
     public string woodSpriteAssetPath = "Assets/Resources/Wood.png";
     public float woodDropYOffset = 0.12f;
+
+    [Header("Stone Harvest")]
+    public int stoneMaxHealth = 100;
+    public int pickaxeDamageToStone = 10;
+    public int stoneDropAmountMin = 2;
+    public int stoneDropAmountMax = 5;
+    public string stoneSpriteAssetPath = DefaultStoneSpriteAssetPath;
+    public string stoneSpriteName = DefaultStoneSpriteName;
+    public float stoneDropYOffset = 0.08f;
+
+    [Header("Drop Behavior")]
     public float woodPickupDistance = 1f;
     [Range(0.01f, 1f)] public float woodDropScale = 0.1f;
     public float woodDropFallDistanceMin = 0.28f;
@@ -55,7 +69,7 @@ public class TreeHoverSelector : MonoBehaviour
     public float woodDropFallDurationMax = 0.26f;
     public float woodDropArcHeight = 0.16f;
 
-    [Header("Wood Collect Animation")]
+    [Header("Drop Collect Animation")]
     public float woodCollectMoveDuration = 0.18f;
     public float woodCollectExpandDuration = 0.08f;
     public float woodCollectShrinkDuration = 0.10f;
@@ -63,16 +77,25 @@ public class TreeHoverSelector : MonoBehaviour
     public float woodCollectTargetYOffset = 0.45f;
     public int woodCollectSortingBoost = 60;
 
-    class TreeEntry
+    enum HarvestKind
+    {
+        Tree,
+        Stone
+    }
+
+    class HarvestEntry
     {
         public Transform root;
         public SpriteRenderer[] renderers;
+        public HarvestKind kind;
     }
 
-    class WoodDropEntry
+    class ResourceDropEntry
     {
         public Transform root;
         public SpriteRenderer renderer;
+        public string itemId;
+        public string displayName;
         public int amount;
         public Vector3 baseScale;
         public int baseSortingLayerId;
@@ -88,46 +111,50 @@ public class TreeHoverSelector : MonoBehaviour
         public bool isCollecting;
     }
 
-    struct TreeSquashState
+    struct HarvestSquashState
     {
         public Transform root;
         public SpriteRenderer[] renderers;
         public Vector3 baseLocalScale;
         public float baseBottomY;
-        public float baseWorldHeight;
         public bool includeShadow;
     }
 
-    private readonly List<TreeEntry> treeEntries = new List<TreeEntry>();
+    private readonly List<HarvestEntry> harvestEntries = new List<HarvestEntry>();
+    private readonly Dictionary<int, int> harvestHealth = new Dictionary<int, int>();
+    private readonly Dictionary<int, Coroutine> activeSquashRoutines = new Dictionary<int, Coroutine>();
+    private readonly List<ResourceDropEntry> resourceDrops = new List<ResourceDropEntry>();
+
     private PlayerToolController toolController;
+    private PlayerToolController boundToolController;
     private Camera mainCam;
     private Grid grid;
     private float animTime;
     private float nextRefreshTime;
+
     private SpriteRenderer selectorRenderer;
     private Transform selectorTransform;
-    private TreeEntry activeHoveredTree;
-    private PlayerToolController boundToolController;
-    private readonly Dictionary<int, Coroutine> activeSquashRoutines = new Dictionary<int, Coroutine>();
-    private readonly Dictionary<int, int> treeHealth = new Dictionary<int, int>();
-    private readonly List<WoodDropEntry> woodDrops = new List<WoodDropEntry>();
+    private HarvestEntry activeHoveredTarget;
+
     private Sprite cachedWoodSprite;
+    private Sprite cachedStoneSprite;
+
     private InventoryModel inventory;
     private InventoryItemData runtimeWoodItem;
+    private InventoryItemData runtimeStoneItem;
     private SpriteRenderer playerSpriteRenderer;
 
     void Awake()
     {
-        treeMaxHealth = FixedTreeMaxHealth;
-        pickaxeDamageToTree = FixedPickaxeTreeDamage;
         toolController = GetComponent<PlayerToolController>();
         inventory = GetComponent<InventoryModel>();
         BindToolController(toolController);
         mainCam = Camera.main;
         grid = FindFirstObjectByType<Grid>();
+
         EnsureFramesLoaded();
         EnsureSelectorObject();
-        RefreshTreeEntries();
+        RefreshHarvestEntries();
         SetSelectorVisible(false);
     }
 
@@ -136,15 +163,24 @@ public class TreeHoverSelector : MonoBehaviour
         BindToolController(null);
         StopAllSquashRoutines();
         SetSelectorVisible(false);
-        activeHoveredTree = null;
+        activeHoveredTarget = null;
     }
 
     void OnDestroy()
     {
-        if (runtimeWoodItem == null) return;
-        if (Application.isPlaying) Destroy(runtimeWoodItem);
-        else DestroyImmediate(runtimeWoodItem);
-        runtimeWoodItem = null;
+        if (runtimeWoodItem != null)
+        {
+            if (Application.isPlaying) Destroy(runtimeWoodItem);
+            else DestroyImmediate(runtimeWoodItem);
+            runtimeWoodItem = null;
+        }
+
+        if (runtimeStoneItem != null)
+        {
+            if (Application.isPlaying) Destroy(runtimeStoneItem);
+            else DestroyImmediate(runtimeStoneItem);
+            runtimeStoneItem = null;
+        }
     }
 
     void Update()
@@ -159,50 +195,50 @@ public class TreeHoverSelector : MonoBehaviour
         if (Time.time >= nextRefreshTime)
         {
             nextRefreshTime = Time.time + 1.5f;
-            RefreshTreeEntries();
+            RefreshHarvestEntries();
             EnsureFramesLoaded();
         }
 
         bool hasMouseWorld = TryGetMouseWorldPoint(out Vector2 mouseWorld);
-        ProcessWoodDrops(hasMouseWorld, mouseWorld);
+        ProcessResourceDrops(hasMouseWorld, mouseWorld);
 
         if (toolController == null || !toolController.IsPickaxeEquipped())
         {
             SetSelectorVisible(false);
-            activeHoveredTree = null;
+            activeHoveredTarget = null;
             return;
         }
 
         if (mainCam == null || selectorFrames == null || selectorFrames.Length == 0)
         {
             SetSelectorVisible(false);
-            activeHoveredTree = null;
+            activeHoveredTarget = null;
             return;
         }
 
         if (!hasMouseWorld)
         {
             SetSelectorVisible(false);
-            activeHoveredTree = null;
+            activeHoveredTarget = null;
             return;
         }
 
-        if (!TryGetHoveredTree(mouseWorld, out TreeEntry hovered, out Bounds hoveredBounds))
+        if (!TryGetHoveredTarget(mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds))
         {
             SetSelectorVisible(false);
-            activeHoveredTree = null;
+            activeHoveredTarget = null;
             return;
         }
 
         if (!IsWithinTileDistance(hoveredBounds))
         {
             SetSelectorVisible(false);
-            activeHoveredTree = null;
+            activeHoveredTarget = null;
             return;
         }
 
         RenderSelector(hovered, hoveredBounds);
-        activeHoveredTree = hovered;
+        activeHoveredTarget = hovered;
     }
 
     void EnsureSelectorObject()
@@ -266,31 +302,31 @@ public class TreeHoverSelector : MonoBehaviour
     {
         if (!registerPickaxeHits) return;
         if (selectorRenderer == null || !selectorRenderer.enabled) return;
-        if (activeHoveredTree == null || activeHoveredTree.root == null) return;
+        if (activeHoveredTarget == null || activeHoveredTarget.root == null) return;
 
-        if (!ApplyPickaxeDamageToTree(activeHoveredTree))
+        if (!ApplyPickaxeDamageToTarget(activeHoveredTarget))
         {
             return;
         }
 
-        StartTreeSquash(activeHoveredTree);
+        StartTargetSquash(activeHoveredTarget);
     }
 
-    void StartTreeSquash(TreeEntry tree)
+    void StartTargetSquash(HarvestEntry target)
     {
-        if (tree == null || tree.root == null) return;
-        int key = tree.root.GetInstanceID();
+        if (target == null || target.root == null) return;
+        int key = target.root.GetInstanceID();
 
         if (activeSquashRoutines.TryGetValue(key, out Coroutine running) && running != null)
         {
             StopCoroutine(running);
         }
-        activeSquashRoutines[key] = StartCoroutine(PlayTreeSquashRoutine(key, tree));
+        activeSquashRoutines[key] = StartCoroutine(PlayTargetSquashRoutine(key, target));
     }
 
-    IEnumerator PlayTreeSquashRoutine(int key, TreeEntry tree)
+    IEnumerator PlayTargetSquashRoutine(int key, HarvestEntry target)
     {
-        if (!TryCaptureTreeSquashState(tree, out TreeSquashState state))
+        if (!TryCaptureSquashState(target, out HarvestSquashState state))
         {
             activeSquashRoutines.Remove(key);
             yield break;
@@ -304,7 +340,7 @@ public class TreeHoverSelector : MonoBehaviour
         {
             t += Time.deltaTime;
             float u = Mathf.Clamp01(t / down);
-            ApplyTreeSquash(state, u);
+            ApplySquash(state, u);
             yield return null;
         }
 
@@ -313,48 +349,43 @@ public class TreeHoverSelector : MonoBehaviour
         {
             t += Time.deltaTime;
             float u = Mathf.Clamp01(t / up);
-            ApplyTreeSquash(state, 1f - u);
+            ApplySquash(state, 1f - u);
             yield return null;
         }
 
-        RestoreTreeSquash(state);
+        RestoreSquash(state);
         activeSquashRoutines.Remove(key);
     }
 
-    bool TryCaptureTreeSquashState(TreeEntry tree, out TreeSquashState state)
+    bool TryCaptureSquashState(HarvestEntry target, out HarvestSquashState state)
     {
         state = default;
-        if (tree == null || tree.root == null) return false;
+        if (target == null || target.root == null) return false;
 
-        float height = 1f;
-        float bottomY = tree.root.position.y;
-        if (TryGetCombinedBounds(tree.renderers, includeShadowInSquash, out Bounds bounds))
+        float bottomY = target.root.position.y;
+        if (TryGetCombinedBounds(target.renderers, includeShadowInSquash, out Bounds bounds))
         {
-            height = Mathf.Max(0.001f, bounds.size.y);
             bottomY = bounds.min.y;
         }
 
-        state = new TreeSquashState
+        state = new HarvestSquashState
         {
-            root = tree.root,
-            renderers = tree.renderers,
-            baseLocalScale = tree.root.localScale,
+            root = target.root,
+            renderers = target.renderers,
+            baseLocalScale = target.root.localScale,
             baseBottomY = bottomY,
-            baseWorldHeight = height,
             includeShadow = includeShadowInSquash
         };
         return true;
     }
 
-    void ApplyTreeSquash(TreeSquashState state, float squashAmount)
+    void ApplySquash(HarvestSquashState state, float squashAmount)
     {
         if (state.root == null) return;
         float sy = Mathf.Lerp(1f, Mathf.Clamp(hitSquashScaleY, 0.4f, 1f), squashAmount);
-        // Keep horizontal scale stable to avoid visible seam splitting on multi-part tree sprites.
-        float sx = 1f;
 
         Vector3 local = state.baseLocalScale;
-        state.root.localScale = new Vector3(local.x * sx, local.y * sy, local.z);
+        state.root.localScale = new Vector3(local.x, local.y * sy, local.z);
 
         if (TryGetCombinedBounds(state.renderers, state.includeShadow, out Bounds scaledBounds))
         {
@@ -368,7 +399,7 @@ public class TreeHoverSelector : MonoBehaviour
         }
     }
 
-    void RestoreTreeSquash(TreeSquashState state)
+    void RestoreSquash(HarvestSquashState state)
     {
         if (state.root == null) return;
         state.root.localScale = state.baseLocalScale;
@@ -412,7 +443,7 @@ public class TreeHoverSelector : MonoBehaviour
     {
         world = Vector2.zero;
         Mouse mouse = Mouse.current;
-        if (mouse == null) return false;
+        if (mouse == null || mainCam == null) return false;
 
         Vector2 screen = mouse.position.ReadValue();
         float z = Mathf.Abs(mainCam.transform.position.z);
@@ -421,60 +452,156 @@ public class TreeHoverSelector : MonoBehaviour
         return true;
     }
 
-    void RefreshTreeEntries()
+    void RefreshHarvestEntries()
     {
-        treeEntries.Clear();
+        harvestEntries.Clear();
+
         HashSet<int> presentIds = new HashSet<int>();
-        FadeableSprite[] fades = FindObjectsByType<FadeableSprite>(includeInactiveTrees ? FindObjectsInactive.Include : FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        HashSet<int> seenRootIds = new HashSet<int>();
+
+        FindObjectsInactive inactiveMode = includeInactiveTrees ? FindObjectsInactive.Include : FindObjectsInactive.Exclude;
+
+        FadeableSprite[] fades = FindObjectsByType<FadeableSprite>(inactiveMode, FindObjectsSortMode.None);
         for (int i = 0; i < fades.Length; i++)
         {
             FadeableSprite fade = fades[i];
-            if (fade == null) continue;
-            Transform root = fade.transform;
-            if (root == null) continue;
+            if (fade == null || fade.transform == null) continue;
+            TryAddHarvestEntry(fade.transform, seenRootIds, presentIds);
+        }
 
-            string rootName = root.name.ToLowerInvariant();
-            if (!rootName.Contains("tree")) continue;
-
-            SpriteRenderer[] renderers = root.GetComponentsInChildren<SpriteRenderer>(true);
-            if (renderers == null || renderers.Length == 0) continue;
-
-            TreeEntry entry = new TreeEntry
-            {
-                root = root,
-                renderers = renderers
-            };
-            treeEntries.Add(entry);
-
-            int id = root.GetInstanceID();
-            presentIds.Add(id);
-            if (!treeHealth.ContainsKey(id))
-            {
-                treeHealth[id] = Mathf.Max(1, treeMaxHealth);
-            }
+        FootColliderMarker[] markers = FindObjectsByType<FootColliderMarker>(inactiveMode, FindObjectsSortMode.None);
+        for (int i = 0; i < markers.Length; i++)
+        {
+            FootColliderMarker marker = markers[i];
+            if (marker == null || marker.transform == null) continue;
+            TryAddHarvestEntry(marker.transform, seenRootIds, presentIds);
         }
 
         List<int> toRemove = new List<int>();
-        foreach (KeyValuePair<int, int> kv in treeHealth)
+        foreach (KeyValuePair<int, int> kv in harvestHealth)
         {
             if (!presentIds.Contains(kv.Key)) toRemove.Add(kv.Key);
         }
         for (int i = 0; i < toRemove.Count; i++)
         {
-            treeHealth.Remove(toRemove[i]);
+            harvestHealth.Remove(toRemove[i]);
         }
     }
 
-    bool TryGetHoveredTree(Vector2 mouseWorld, out TreeEntry hovered, out Bounds hoveredBounds)
+    void TryAddHarvestEntry(Transform t, HashSet<int> seenRootIds, HashSet<int> presentIds)
+    {
+        if (t == null) return;
+
+        Transform root = t;
+        if (t.parent != null)
+        {
+            FootColliderMarker marker = t.GetComponent<FootColliderMarker>();
+            if (marker == null)
+            {
+                root = t.root;
+            }
+        }
+
+        if (root == null) return;
+        int id = root.GetInstanceID();
+        if (seenRootIds.Contains(id)) return;
+
+        if (!TryResolveHarvestKind(root, out HarvestKind kind)) return;
+
+        SpriteRenderer[] renderers = root.GetComponentsInChildren<SpriteRenderer>(true);
+        if (renderers == null || renderers.Length == 0) return;
+
+        if (!root.gameObject.activeInHierarchy && !includeInactiveTrees) return;
+
+        harvestEntries.Add(new HarvestEntry
+        {
+            root = root,
+            renderers = renderers,
+            kind = kind
+        });
+
+        seenRootIds.Add(id);
+        presentIds.Add(id);
+
+        if (!harvestHealth.ContainsKey(id))
+        {
+            harvestHealth[id] = GetMaxHealthForKind(kind);
+        }
+    }
+
+    bool TryResolveHarvestKind(Transform root, out HarvestKind kind)
+    {
+        kind = HarvestKind.Tree;
+        if (root == null) return false;
+
+        FootColliderMarker directMarker = root.GetComponent<FootColliderMarker>();
+        if (IsRockMarker(directMarker))
+        {
+            kind = HarvestKind.Stone;
+            return true;
+        }
+        if (IsTreeMarker(directMarker))
+        {
+            kind = HarvestKind.Tree;
+            return true;
+        }
+
+        FootColliderMarker[] childMarkers = root.GetComponentsInChildren<FootColliderMarker>(true);
+        for (int i = 0; i < childMarkers.Length; i++)
+        {
+            FootColliderMarker m = childMarkers[i];
+            if (IsRockMarker(m))
+            {
+                kind = HarvestKind.Stone;
+                return true;
+            }
+            if (IsTreeMarker(m))
+            {
+                kind = HarvestKind.Tree;
+                return true;
+            }
+        }
+
+        string n = root.name.ToLowerInvariant();
+        if (n.Contains("rock") || n.Contains("stone"))
+        {
+            kind = HarvestKind.Stone;
+            return true;
+        }
+        if (n.Contains("tree"))
+        {
+            kind = HarvestKind.Tree;
+            return true;
+        }
+
+        return false;
+    }
+
+    static bool IsRockMarker(FootColliderMarker marker)
+    {
+        if (marker == null || string.IsNullOrWhiteSpace(marker.obstacleKind)) return false;
+        string kind = marker.obstacleKind.Trim();
+        return string.Equals(kind, "Rock", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(kind, "Stone", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static bool IsTreeMarker(FootColliderMarker marker)
+    {
+        if (marker == null || string.IsNullOrWhiteSpace(marker.obstacleKind)) return false;
+        string kind = marker.obstacleKind.Trim();
+        return string.Equals(kind, "Tree", StringComparison.OrdinalIgnoreCase);
+    }
+
+    bool TryGetHoveredTarget(Vector2 mouseWorld, out HarvestEntry hovered, out Bounds hoveredBounds)
     {
         hovered = null;
         hoveredBounds = default;
         float bestDistance = float.MaxValue;
 
         Vector3 probe = new Vector3(mouseWorld.x, mouseWorld.y, 0f);
-        for (int i = 0; i < treeEntries.Count; i++)
+        for (int i = 0; i < harvestEntries.Count; i++)
         {
-            TreeEntry entry = treeEntries[i];
+            HarvestEntry entry = harvestEntries[i];
             if (entry == null || entry.root == null) continue;
             if (!entry.root.gameObject.activeInHierarchy && !includeInactiveTrees) continue;
 
@@ -504,6 +631,8 @@ public class TreeHoverSelector : MonoBehaviour
     {
         bounds = default;
         bool hasAny = false;
+        if (renderers == null) return false;
+
         for (int i = 0; i < renderers.Length; i++)
         {
             SpriteRenderer sr = renderers[i];
@@ -529,7 +658,7 @@ public class TreeHoverSelector : MonoBehaviour
         return n.Contains("shadow");
     }
 
-    bool IsWithinTileDistance(Bounds treeBounds)
+    bool IsWithinTileDistance(Bounds targetBounds)
     {
         float tileSize = fallbackTileWorldSize;
         if (grid != null)
@@ -539,11 +668,11 @@ public class TreeHoverSelector : MonoBehaviour
 
         float maxDistance = Mathf.Max(0.01f, maxHoverTiles * tileSize);
         Vector3 p = transform.position;
-        Vector3 closest = treeBounds.ClosestPoint(p);
+        Vector3 closest = targetBounds.ClosestPoint(p);
         return Vector2.Distance(new Vector2(p.x, p.y), new Vector2(closest.x, closest.y)) <= maxDistance;
     }
 
-    void RenderSelector(TreeEntry tree, Bounds treeBounds)
+    void RenderSelector(HarvestEntry target, Bounds targetBounds)
     {
         EnsureSelectorObject();
         if (selectorRenderer == null || selectorFrames == null || selectorFrames.Length == 0) return;
@@ -556,13 +685,13 @@ public class TreeHoverSelector : MonoBehaviour
 
         selectorRenderer.sprite = frame;
         selectorTransform.position = new Vector3(
-            treeBounds.center.x + selectorOffset.x,
-            treeBounds.center.y + selectorOffset.y,
+            targetBounds.center.x + selectorOffset.x,
+            targetBounds.center.y + selectorOffset.y,
             0f);
 
         Vector2 frameSize = frame.bounds.size;
-        float sx = frameSize.x > 0.0001f ? (treeBounds.size.x * selectorPadding) / frameSize.x : 1f;
-        float sy = frameSize.y > 0.0001f ? (treeBounds.size.y * selectorPadding) / frameSize.y : 1f;
+        float sx = frameSize.x > 0.0001f ? (targetBounds.size.x * selectorPadding) / frameSize.x : 1f;
+        float sy = frameSize.y > 0.0001f ? (targetBounds.size.y * selectorPadding) / frameSize.y : 1f;
         sx *= Mathf.Max(0.01f, selectorScaleMultiplier.x);
         sy *= Mathf.Max(0.01f, selectorScaleMultiplier.y);
         selectorTransform.localScale = new Vector3(sx, sy, 1f);
@@ -570,9 +699,9 @@ public class TreeHoverSelector : MonoBehaviour
         int highestOrder = 0;
         int layerId = 0;
         bool hasLayer = false;
-        for (int i = 0; i < tree.renderers.Length; i++)
+        for (int i = 0; i < target.renderers.Length; i++)
         {
-            SpriteRenderer sr = tree.renderers[i];
+            SpriteRenderer sr = target.renderers[i];
             if (sr == null) continue;
             if (!hasLayer)
             {
@@ -593,14 +722,14 @@ public class TreeHoverSelector : MonoBehaviour
 
 #if UNITY_EDITOR
         Dictionary<int, Sprite> selected = new Dictionary<int, Sprite>();
-        Object[] loaded = AssetDatabase.LoadAllAssetsAtPath(selectorAsepritePath);
+        UnityEngine.Object[] loaded = AssetDatabase.LoadAllAssetsAtPath(selectorAsepritePath);
         for (int i = 0; i < loaded.Length; i++)
         {
             Sprite s = loaded[i] as Sprite;
             if (s == null) continue;
             for (int f = 0; f < SelectorFrameNames.Length; f++)
             {
-                if (!string.Equals(s.name, SelectorFrameNames[f], System.StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(s.name, SelectorFrameNames[f], StringComparison.OrdinalIgnoreCase)) continue;
                 selected[f] = s;
                 break;
             }
@@ -619,75 +748,105 @@ public class TreeHoverSelector : MonoBehaviour
 #endif
     }
 
-    bool ApplyPickaxeDamageToTree(TreeEntry tree)
+    bool ApplyPickaxeDamageToTarget(HarvestEntry target)
     {
-        if (tree == null || tree.root == null) return false;
+        if (target == null || target.root == null) return false;
 
-        int id = tree.root.GetInstanceID();
-        if (!treeHealth.TryGetValue(id, out int hp))
+        int id = target.root.GetInstanceID();
+        if (!harvestHealth.TryGetValue(id, out int hp))
         {
-            hp = Mathf.Max(1, treeMaxHealth);
+            hp = GetMaxHealthForKind(target.kind);
         }
 
-        hp -= Mathf.Max(1, pickaxeDamageToTree);
-        treeHealth[id] = hp;
+        hp -= GetDamageForKind(target.kind);
+        harvestHealth[id] = hp;
         if (hp > 0) return true;
 
-        DestroyTreeAndDropWood(tree);
+        DestroyTargetAndDropResources(target);
         return false;
     }
 
-    void DestroyTreeAndDropWood(TreeEntry tree)
+    int GetMaxHealthForKind(HarvestKind kind)
     {
-        if (tree == null || tree.root == null) return;
+        return kind == HarvestKind.Stone
+            ? Mathf.Max(1, stoneMaxHealth)
+            : Mathf.Max(1, treeMaxHealth);
+    }
 
-        Transform root = tree.root;
+    int GetDamageForKind(HarvestKind kind)
+    {
+        return kind == HarvestKind.Stone
+            ? Mathf.Max(1, pickaxeDamageToStone)
+            : Mathf.Max(1, pickaxeDamageToTree);
+    }
+
+    void DestroyTargetAndDropResources(HarvestEntry target)
+    {
+        if (target == null || target.root == null) return;
+
+        Transform root = target.root;
         int id = root.GetInstanceID();
 
         Bounds b;
-        if (!TryGetCombinedBounds(tree.renderers, out b))
+        if (!TryGetCombinedBounds(target.renderers, out b))
         {
             b = new Bounds(root.position, new Vector3(1f, 1f, 0f));
         }
 
-        Vector3 dropPos = new Vector3(b.center.x, b.min.y + woodDropYOffset, 0f);
-        SpawnWoodDrop(dropPos, tree);
+        if (target.kind == HarvestKind.Stone)
+        {
+            Vector3 stoneDropPos = new Vector3(b.center.x, b.min.y + stoneDropYOffset, 0f);
+            int amount = ResolveRandomAmount(stoneDropAmountMin, stoneDropAmountMax);
+            SpawnResourceDrop(stoneDropPos, target, "stone", "Stone", ResolveStoneSprite(), amount);
+        }
+        else
+        {
+            Vector3 woodDropPos = new Vector3(b.center.x, b.min.y + woodDropYOffset, 0f);
+            int amount = ResolveRandomAmount(woodDropAmountMin, woodDropAmountMax);
+            SpawnResourceDrop(woodDropPos, target, "wood", "Wood", ResolveWoodSprite(), amount);
+        }
 
         if (activeSquashRoutines.TryGetValue(id, out Coroutine running) && running != null)
         {
             StopCoroutine(running);
             activeSquashRoutines.Remove(id);
         }
-        treeHealth.Remove(id);
+        harvestHealth.Remove(id);
 
-        if (activeHoveredTree != null && activeHoveredTree.root == root)
+        if (activeHoveredTarget != null && activeHoveredTarget.root == root)
         {
-            activeHoveredTree = null;
+            activeHoveredTarget = null;
             SetSelectorVisible(false);
         }
 
-        treeEntries.RemoveAll(e => e == null || e.root == null || e.root == root);
+        harvestEntries.RemoveAll(e => e == null || e.root == null || e.root == root);
         Destroy(root.gameObject);
     }
 
-    void SpawnWoodDrop(Vector3 worldPos, TreeEntry sourceTree)
+    static int ResolveRandomAmount(int minInclusive, int maxInclusive)
     {
-        GameObject drop = new GameObject("WoodDrop");
+        int min = Mathf.Max(1, minInclusive);
+        int max = Mathf.Max(min, maxInclusive);
+        return UnityEngine.Random.Range(min, max + 1);
+    }
+
+    void SpawnResourceDrop(Vector3 worldPos, HarvestEntry sourceTarget, string itemId, string displayName, Sprite dropSprite, int amount)
+    {
+        GameObject drop = new GameObject(displayName + "Drop");
         drop.transform.position = worldPos;
         drop.layer = LayerMask.NameToLayer("Ignore Raycast");
 
         SpriteRenderer sr = drop.AddComponent<SpriteRenderer>();
-        Sprite wood = ResolveWoodSprite();
-        if (wood != null) sr.sprite = wood;
+        if (dropSprite != null) sr.sprite = dropSprite;
 
         int highestOrder = 0;
         int sortingLayerId = 0;
         bool hasLayer = false;
-        if (sourceTree != null && sourceTree.renderers != null)
+        if (sourceTarget != null && sourceTarget.renderers != null)
         {
-            for (int i = 0; i < sourceTree.renderers.Length; i++)
+            for (int i = 0; i < sourceTarget.renderers.Length; i++)
             {
-                SpriteRenderer r = sourceTree.renderers[i];
+                SpriteRenderer r = sourceTarget.renderers[i];
                 if (r == null) continue;
                 if (!hasLayer)
                 {
@@ -700,23 +859,25 @@ public class TreeHoverSelector : MonoBehaviour
         if (hasLayer) sr.sortingLayerID = sortingLayerId;
         sr.sortingOrder = highestOrder + 2;
 
-        float side = Random.value < 0.5f ? -1f : 1f;
-        float sideDistance = Random.Range(
+        float side = UnityEngine.Random.value < 0.5f ? -1f : 1f;
+        float sideDistance = UnityEngine.Random.Range(
             Mathf.Max(0.01f, woodDropFallDistanceMin),
             Mathf.Max(Mathf.Max(0.01f, woodDropFallDistanceMin), woodDropFallDistanceMax));
-        Vector3 fallTarget = worldPos + new Vector3(side * sideDistance, Random.Range(-0.04f, 0.08f), 0f);
-        float fallDuration = Random.Range(
+        Vector3 fallTarget = worldPos + new Vector3(side * sideDistance, UnityEngine.Random.Range(-0.04f, 0.08f), 0f);
+        float fallDuration = UnityEngine.Random.Range(
             Mathf.Max(0.02f, woodDropFallDurationMin),
             Mathf.Max(Mathf.Max(0.02f, woodDropFallDurationMin), woodDropFallDurationMax));
 
         Vector3 dropScale = Vector3.one * Mathf.Max(0.01f, woodDropScale * 2f);
         drop.transform.localScale = dropScale;
 
-        woodDrops.Add(new WoodDropEntry
+        resourceDrops.Add(new ResourceDropEntry
         {
             root = drop.transform,
             renderer = sr,
-            amount = Mathf.Max(1, woodDropAmount),
+            itemId = itemId,
+            displayName = displayName,
+            amount = Mathf.Max(1, amount),
             baseScale = dropScale,
             baseSortingLayerId = sr.sortingLayerID,
             baseSortingOrder = sr.sortingOrder,
@@ -744,33 +905,100 @@ public class TreeHoverSelector : MonoBehaviour
         return cachedWoodSprite;
     }
 
-    void ProcessWoodDrops(bool hasMouseWorld, Vector2 mouseWorld)
+    Sprite ResolveStoneSprite()
     {
-        if (woodDrops.Count == 0) return;
+        if (cachedStoneSprite != null) return cachedStoneSprite;
 
-        for (int i = woodDrops.Count - 1; i >= 0; i--)
+#if UNITY_EDITOR
+        if (!string.IsNullOrWhiteSpace(stoneSpriteAssetPath))
         {
-            WoodDropEntry drop = woodDrops[i];
+            if (stoneSpriteAssetPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                stoneSpriteAssetPath.EndsWith(".aseprite", StringComparison.OrdinalIgnoreCase))
+            {
+                UnityEngine.Object[] all = AssetDatabase.LoadAllAssetsAtPath(stoneSpriteAssetPath);
+                string wanted = string.IsNullOrWhiteSpace(stoneSpriteName) ? DefaultStoneSpriteName : stoneSpriteName.Trim();
+
+                for (int i = 0; i < all.Length; i++)
+                {
+                    Sprite s = all[i] as Sprite;
+                    if (s == null) continue;
+                    if (string.Equals(s.name, wanted, StringComparison.OrdinalIgnoreCase))
+                    {
+                        cachedStoneSprite = s;
+                        break;
+                    }
+                }
+
+                if (cachedStoneSprite == null)
+                {
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        Sprite s = all[i] as Sprite;
+                        if (s == null) continue;
+                        string n = s.name.ToLowerInvariant();
+                        if (n.Contains("stone") && n.Contains("06"))
+                        {
+                            cachedStoneSprite = s;
+                            break;
+                        }
+                    }
+                }
+
+                if (cachedStoneSprite == null)
+                {
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        Sprite s = all[i] as Sprite;
+                        if (s != null)
+                        {
+                            cachedStoneSprite = s;
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                cachedStoneSprite = AssetDatabase.LoadAssetAtPath<Sprite>(stoneSpriteAssetPath);
+            }
+        }
+#endif
+
+        if (cachedStoneSprite == null)
+        {
+            cachedStoneSprite = Resources.Load<Sprite>("Stone 06");
+        }
+
+        return cachedStoneSprite;
+    }
+
+    void ProcessResourceDrops(bool hasMouseWorld, Vector2 mouseWorld)
+    {
+        if (resourceDrops.Count == 0) return;
+
+        for (int i = resourceDrops.Count - 1; i >= 0; i--)
+        {
+            ResourceDropEntry drop = resourceDrops[i];
             if (drop == null || drop.root == null)
             {
-                woodDrops.RemoveAt(i);
+                resourceDrops.RemoveAt(i);
                 continue;
             }
 
             if (drop.isCollecting)
             {
-                bool done = UpdateWoodDropCollectAnimation(drop);
+                bool done = UpdateDropCollectAnimation(drop);
                 if (done)
                 {
                     if (drop.root != null) Destroy(drop.root.gameObject);
-                    woodDrops.RemoveAt(i);
+                    resourceDrops.RemoveAt(i);
                 }
                 continue;
             }
 
             if (drop.isFalling)
             {
-                UpdateWoodDropFalling(drop);
+                UpdateDropFalling(drop);
                 continue;
             }
 
@@ -786,12 +1014,12 @@ public class TreeHoverSelector : MonoBehaviour
             }
 
             if (!nearPlayer && !hovered) continue;
-            if (!TryPickupWood(drop)) continue;
-            StartWoodDropCollectAnimation(drop);
+            if (!TryPickupResource(drop)) continue;
+            StartDropCollectAnimation(drop);
         }
     }
 
-    void UpdateWoodDropFalling(WoodDropEntry drop)
+    void UpdateDropFalling(ResourceDropEntry drop)
     {
         if (drop == null || drop.root == null) return;
 
@@ -809,18 +1037,18 @@ public class TreeHoverSelector : MonoBehaviour
         drop.isFalling = false;
     }
 
-    void StartWoodDropCollectAnimation(WoodDropEntry drop)
+    void StartDropCollectAnimation(ResourceDropEntry drop)
     {
         if (drop == null || drop.root == null || drop.renderer == null) return;
 
         drop.isCollecting = true;
         drop.collectElapsed = 0f;
         drop.collectStart = drop.root.position;
-        drop.collectTarget = ResolveCurrentWoodCollectTarget(drop);
-        SetWoodDropCollectSorting(drop);
+        drop.collectTarget = ResolveCurrentCollectTarget(drop);
+        SetDropCollectSorting(drop);
     }
 
-    bool UpdateWoodDropCollectAnimation(WoodDropEntry drop)
+    bool UpdateDropCollectAnimation(ResourceDropEntry drop)
     {
         if (drop == null || drop.root == null || drop.renderer == null) return true;
 
@@ -832,8 +1060,8 @@ public class TreeHoverSelector : MonoBehaviour
         drop.collectElapsed += Time.deltaTime;
         float t = drop.collectElapsed;
 
-        drop.collectTarget = ResolveCurrentWoodCollectTarget(drop);
-        SetWoodDropCollectSorting(drop);
+        drop.collectTarget = ResolveCurrentCollectTarget(drop);
+        SetDropCollectSorting(drop);
 
         if (t <= moveDuration)
         {
@@ -866,7 +1094,7 @@ public class TreeHoverSelector : MonoBehaviour
         return true;
     }
 
-    Vector3 ResolveCurrentWoodCollectTarget(WoodDropEntry drop)
+    Vector3 ResolveCurrentCollectTarget(ResourceDropEntry drop)
     {
         float z = drop != null && drop.root != null ? drop.root.position.z : 0f;
         return new Vector3(
@@ -875,7 +1103,7 @@ public class TreeHoverSelector : MonoBehaviour
             z);
     }
 
-    void SetWoodDropCollectSorting(WoodDropEntry drop)
+    void SetDropCollectSorting(ResourceDropEntry drop)
     {
         if (drop == null || drop.renderer == null) return;
 
@@ -890,17 +1118,32 @@ public class TreeHoverSelector : MonoBehaviour
         drop.renderer.sortingOrder = drop.baseSortingOrder + Mathf.Max(1, woodCollectSortingBoost);
     }
 
-    bool TryPickupWood(WoodDropEntry drop)
+    bool TryPickupResource(ResourceDropEntry drop)
     {
-        if (inventory == null) return false;
-        EnsureRuntimeWoodItem();
-        if (runtimeWoodItem == null) return false;
+        if (inventory == null || drop == null) return false;
 
-        return inventory.TryAddItem(runtimeWoodItem, Mathf.Max(1, drop.amount));
+        EnsureRuntimeItem(drop.itemId);
+        InventoryItemData data = ResolveRuntimeItem(drop.itemId);
+        if (data == null) return false;
+
+        return inventory.TryAddItem(data, Mathf.Max(1, drop.amount));
     }
 
-    void EnsureRuntimeWoodItem()
+    void EnsureRuntimeItem(string itemId)
     {
+        string normalized = string.IsNullOrWhiteSpace(itemId) ? string.Empty : itemId.Trim().ToLowerInvariant();
+
+        if (normalized == "stone")
+        {
+            if (runtimeStoneItem != null) return;
+            runtimeStoneItem = ScriptableObject.CreateInstance<InventoryItemData>();
+            runtimeStoneItem.hideFlags = HideFlags.HideAndDontSave;
+            runtimeStoneItem.itemId = "stone";
+            runtimeStoneItem.displayName = "Stone";
+            runtimeStoneItem.icon = ResolveStoneSprite();
+            return;
+        }
+
         if (runtimeWoodItem != null) return;
         runtimeWoodItem = ScriptableObject.CreateInstance<InventoryItemData>();
         runtimeWoodItem.hideFlags = HideFlags.HideAndDontSave;
@@ -908,4 +1151,12 @@ public class TreeHoverSelector : MonoBehaviour
         runtimeWoodItem.displayName = "Wood";
         runtimeWoodItem.icon = ResolveWoodSprite();
     }
+
+    InventoryItemData ResolveRuntimeItem(string itemId)
+    {
+        string normalized = string.IsNullOrWhiteSpace(itemId) ? string.Empty : itemId.Trim().ToLowerInvariant();
+        if (normalized == "stone") return runtimeStoneItem;
+        return runtimeWoodItem;
+    }
 }
+
