@@ -102,6 +102,21 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
                 continue;
             }
 
+            // Preserve manually edited rock colliders in scene/prefabs.
+            // If a rock already has any collider, keep it as-is so editor tweaks stick.
+            if (obstacleKind == "Rock" && allCols != null && allCols.Length > 0)
+            {
+                if (marker == null) marker = sr.gameObject.AddComponent<FootColliderMarker>();
+                marker.obstacleKind = "Rock";
+
+                for (int c = 0; c < allCols.Length; c++)
+                {
+                    if (allCols[c] == null) continue;
+                    allCols[c].isTrigger = false;
+                }
+                continue;
+            }
+
             // For tree/rock obstacles, standardize collider to a single foot BoxCollider2D.
             for (int c = 0; c < allCols.Length; c++)
             {
