@@ -27,6 +27,7 @@ public class MiniMapController : MonoBehaviour
     public float creatureBlipSize = 18f;
     [Min(0.1f)] public float creatureScanInterval = 0.45f;
     public Color creatureBlipTint = Color.white;
+    public bool hideDuringEngagedBattle = true;
 
     private const string RootName = "__MiniMapUI";
     private const string CameraName = "__MiniMapCamera";
@@ -65,6 +66,13 @@ public class MiniMapController : MonoBehaviour
         {
             EnsureInitialized();
         }
+
+        if (hideDuringEngagedBattle && BattleSystem.IsEngagedBattleActive)
+        {
+            SetMiniMapVisible(false);
+            return;
+        }
+        SetMiniMapVisible(true);
 
         if (minimapCamera == null) return;
         Vector3 p = transform.position;
@@ -426,5 +434,14 @@ public class MiniMapController : MonoBehaviour
         tex.Apply(false, false);
         circleSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
         return circleSprite;
+    }
+
+    void SetMiniMapVisible(bool visible)
+    {
+        if (minimapCamera != null) minimapCamera.enabled = visible;
+        if (rootRect != null && rootRect.gameObject.activeSelf != visible)
+        {
+            rootRect.gameObject.SetActive(visible);
+        }
     }
 }
