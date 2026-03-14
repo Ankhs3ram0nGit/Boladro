@@ -600,6 +600,17 @@ public class CreaturePartySidebarUI : MonoBehaviour
             int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, instance.soulTraits, level));
             int curHp = Mathf.Clamp(instance.currentHP, 0, maxHp);
             float hpRatio = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
+            bool levelPulseActive = CreatureLevelUpSignal.TryGetPulse01(instance, out _);
+
+            if (levelPulseActive)
+            {
+                if (view.levelText != null) view.levelText.text = "Lv " + level;
+                if (view.background != null)
+                {
+                    view.background.color = view.isActive ? activeMarkerColor : markerColor;
+                }
+                continue;
+            }
 
             if (view.nameText != null)
             {
@@ -754,14 +765,22 @@ public class CreaturePartySidebarUI : MonoBehaviour
                     view.levelUpArrowRect.localScale = new Vector3(pop, pop, 1f);
                     view.levelUpArrowRect.anchoredPosition = new Vector2(8f, bob);
                     view.levelUpArrow.enabled = true;
+
+                    float cardPulse = 1f + Mathf.Sin(pulse01 * Mathf.PI * 4f) * 0.045f * envelope;
+                    view.slotRect.localScale = new Vector3(cardPulse, cardPulse, 1f);
                 }
                 else
                 {
                     view.levelUpArrowRect.localScale = Vector3.one;
                     view.levelUpArrowRect.anchoredPosition = new Vector2(8f, 0f);
                     view.levelUpArrow.enabled = false;
+                    view.slotRect.localScale = Vector3.one;
                 }
                 view.levelUpArrowRect.SetAsLastSibling();
+            }
+            else
+            {
+                view.slotRect.localScale = Vector3.one;
             }
 
             if (view.faintedOverlayRect != null)

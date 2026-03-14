@@ -10,7 +10,7 @@ public static class CreatureLevelUpSignal
     }
 
     private const float DefaultDuration = 1.8f;
-    private const float PendingReleaseDelayAfterBattleSeconds = 2.0f;
+    private const float PendingReleaseDelayAfterBattleSeconds = 1.0f;
     private static readonly Dictionary<string, PulseState> ActivePulses = new Dictionary<string, PulseState>();
     private static readonly Dictionary<string, PulseState> PendingPulses = new Dictionary<string, PulseState>();
 
