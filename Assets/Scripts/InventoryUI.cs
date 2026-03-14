@@ -8,6 +8,7 @@ public class InventoryUI : MonoBehaviour
 {
     const int MinRecommendedSlotSize = 90;
     const int DefaultRecommendedIconSize = 80;
+    const float IconDisplayScale = 0.9f;
     static readonly Color DefaultSlotNormalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
     static readonly Color DefaultEmptySlotFillColor = new Color(0f, 0f, 0f, 0.45f);
 
@@ -254,7 +255,8 @@ public class InventoryUI : MonoBehaviour
         irt.anchorMin = new Vector2(0.5f, 0.5f);
         irt.anchorMax = new Vector2(0.5f, 0.5f);
         irt.pivot = new Vector2(0.5f, 0.5f);
-        irt.sizeDelta = new Vector2(iconSize, iconSize);
+        int displayIconSize = ResolveDisplayIconSize();
+        irt.sizeDelta = new Vector2(displayIconSize, displayIconSize);
 
         GameObject countObj = new GameObject("Count");
         countObj.transform.SetParent(slotObj.transform, false);
@@ -340,7 +342,8 @@ public class InventoryUI : MonoBehaviour
         draggingIcon.transform.SetAsLastSibling();
         draggingIcon.sprite = slot.icon.sprite;
         draggingIcon.color = Color.white;
-        draggingIcon.rectTransform.sizeDelta = new Vector2(iconSize, iconSize);
+        int displayIconSize = ResolveDisplayIconSize();
+        draggingIcon.rectTransform.sizeDelta = new Vector2(displayIconSize, displayIconSize);
         draggingIcon.gameObject.SetActive(true);
         UpdateDraggingIconPosition(Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero);
     }
@@ -500,9 +503,15 @@ public class InventoryUI : MonoBehaviour
             RectTransform iconRt = slot.icon.rectTransform;
             if (iconRt != null)
             {
-                iconRt.sizeDelta = new Vector2(iconSize, iconSize);
+                int displayIconSize = ResolveDisplayIconSize();
+                iconRt.sizeDelta = new Vector2(displayIconSize, displayIconSize);
             }
         }
+    }
+
+    int ResolveDisplayIconSize()
+    {
+        return Mathf.Max(1, Mathf.RoundToInt(iconSize * IconDisplayScale));
     }
 
     void NormalizeVisualSettings()

@@ -4,6 +4,8 @@ using UnityEngine.InputSystem;
 
 public class InventoryHotbar : MonoBehaviour
 {
+    const float IconDisplayScale = 0.9f;
+
     public int slotCount = 5;
     public int slotSize = 90;
     public int iconSize = 80;
@@ -175,7 +177,8 @@ public class InventoryHotbar : MonoBehaviour
         iconRt.anchorMax = new Vector2(0.5f, 0.5f);
         iconRt.pivot = new Vector2(0.5f, 0.5f);
         iconRt.anchoredPosition = Vector2.zero;
-        iconRt.sizeDelta = new Vector2(iconSize, iconSize);
+        int displayIconSize = ResolveDisplayIconSize();
+        iconRt.sizeDelta = new Vector2(displayIconSize, displayIconSize);
 
         iconImage.sprite = icon;
         iconImage.color = Color.white;
@@ -211,6 +214,11 @@ public class InventoryHotbar : MonoBehaviour
     void OnValidate()
     {
         EnsureSprites();
+    }
+
+    int ResolveDisplayIconSize()
+    {
+        return Mathf.Max(1, Mathf.RoundToInt(iconSize * IconDisplayScale));
     }
 
     Sprite CreateSlotSprite(Color32 fill, Color32 border)
