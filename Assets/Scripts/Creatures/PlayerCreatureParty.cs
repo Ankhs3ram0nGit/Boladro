@@ -157,6 +157,67 @@ public class PlayerCreatureParty : MonoBehaviour
         return activeCreatures != null && activeCreatures.Count < MaxPartySize;
     }
 
+    public CreatureInstance GetCreatureAt(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= activeCreatures.Count) return null;
+        return activeCreatures[slotIndex];
+    }
+
+    public int FindFirstEmptyPartySlotIndex()
+    {
+        return HasSpaceInParty() ? activeCreatures.Count : -1;
+    }
+
+    public bool TrySetCreatureAtSlot(int slotIndex, CreatureInstance creature, out CreatureInstance replaced)
+    {
+        replaced = null;
+        if (creature == null) return false;
+        if (slotIndex < 0 || slotIndex >= MaxPartySize) return false;
+
+        if (slotIndex < activeCreatures.Count)
+        {
+            replaced = activeCreatures[slotIndex];
+            activeCreatures[slotIndex] = creature;
+            PartyChanged?.Invoke();
+            return true;
+        }
+
+        if (!HasSpaceInParty()) return false;
+        int insertIndex = Mathf.Clamp(slotIndex, 0, activeCreatures.Count);
+        activeCreatures.Insert(insertIndex, creature);
+        if (activePartyIndex >= insertIndex)
+        {
+            activePartyIndex = Mathf.Clamp(activePartyIndex + 1, 0, activeCreatures.Count - 1);
+        }
+        PartyChanged?.Invoke();
+        return true;
+    }
+
+    public bool TryTakeCreatureAtSlot(int slotIndex, out CreatureInstance removed)
+    {
+        removed = null;
+        if (slotIndex < 0 || slotIndex >= activeCreatures.Count) return false;
+
+        removed = activeCreatures[slotIndex];
+        activeCreatures.RemoveAt(slotIndex);
+
+        if (activeCreatures.Count <= 0)
+        {
+            activePartyIndex = 0;
+        }
+        else if (activePartyIndex > slotIndex)
+        {
+            activePartyIndex = Mathf.Clamp(activePartyIndex - 1, 0, activeCreatures.Count - 1);
+        }
+        else if (activePartyIndex >= activeCreatures.Count)
+        {
+            activePartyIndex = activeCreatures.Count - 1;
+        }
+
+        PartyChanged?.Invoke();
+        return true;
+    }
+
     public bool TryAddCapturedCreature(CreatureInstance instance, bool makeActive = false)
     {
         if (instance == null) return false;

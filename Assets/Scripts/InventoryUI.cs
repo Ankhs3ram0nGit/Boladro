@@ -4,6 +4,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
 using System.Collections.Generic;
+using System.Text;
 
 public class InventoryUI : MonoBehaviour
 {
@@ -14,6 +15,21 @@ public class InventoryUI : MonoBehaviour
         Skills = 2,
         Crafting = 3,
         Player = 4
+    }
+
+    enum CreatureDetailSubTab
+    {
+        Summary = 0,
+        Attacks = 1,
+        SoulTraits = 2
+    }
+
+    enum DragMode
+    {
+        None = 0,
+        Item = 1,
+        CreatureStorage = 2,
+        CreatureParty = 3
     }
 
     const int MinRecommendedSlotSize = 90;
@@ -44,7 +60,9 @@ public class InventoryUI : MonoBehaviour
     private InventorySlotUI[] hotbarSlots;
     private InventorySlotUI[] bagSlots;
     private InventorySlotUI draggingFrom;
+    private InventorySlotUI selectedInventorySlot;
     private Image draggingIcon;
+    private DragMode dragMode = DragMode.None;
 
     private InventoryTab activeTab = InventoryTab.Items;
     private RectTransform tabsRoot;
@@ -54,12 +72,44 @@ public class InventoryUI : MonoBehaviour
     private RectTransform creatureGridRoot;
     private RectTransform creaturePagerRoot;
     private CreatureStorageSlotUI[] creatureSlots;
+    private CreaturePartySlotUI[] creaturePartySlots;
     private Button creaturePrevPageButton;
     private Button creatureNextPageButton;
     private Text creaturePageLabel;
+    private RectTransform creatureRightPanelRoot;
+    private RectTransform creatureDetailsRoot;
+    private RectTransform creatureSubTabsRoot;
+    private Image creatureDetailSprite;
+    private Text creatureDetailNameText;
+    private Text creatureDetailTypesText;
+    private Image creatureDetailHpBg;
+    private Image creatureDetailHpFill;
+    private Image creatureDetailXpBg;
+    private Image creatureDetailXpFill;
+    private Text creatureDetailHpText;
+    private Text creatureDetailXpText;
+    private Text creatureDetailBodyText;
+    private Button creatureSummaryTabButton;
+    private Button creatureAttacksTabButton;
+    private Button creatureSoulTraitsTabButton;
+
+    private RectTransform itemDetailsRoot;
+    private Image itemDetailsIcon;
+    private Text itemDetailsNameText;
+    private Text itemDetailsCountText;
+    private Button itemUseButton;
+    private Button itemDropButton;
+    private Button itemDiscardButton;
+
     private RectTransform placeholderRoot;
     private Text placeholderLabel;
     private int creaturePageIndex;
+    private int selectedCreatureStorageIndex = -1;
+    private int selectedCreaturePartyIndex = -1;
+    private bool selectedCreatureFromParty;
+    private CreatureDetailSubTab activeCreatureDetailSubTab = CreatureDetailSubTab.Summary;
+    private int draggingCreatureStorageIndex = -1;
+    private int draggingCreaturePartyIndex = -1;
     private readonly List<Image> backdropBlurLayers = new List<Image>();
 
     private PlayerCreatureParty party;
@@ -157,6 +207,16 @@ public class InventoryUI : MonoBehaviour
         draggingIcon.rectTransform.anchoredPosition = pos;
     }
 
+    void EnsureDraggingIcon()
+    {
+        if (draggingIcon != null) return;
+        GameObject go = new GameObject("DraggingIcon");
+        go.transform.SetParent(transform, false);
+        draggingIcon = go.AddComponent<Image>();
+        draggingIcon.raycastTarget = false;
+        draggingIcon.preserveAspect = true;
+    }
+
     void BuildUI()
     {
         NormalizeVisualSettings();
@@ -185,11 +245,17 @@ public class InventoryUI : MonoBehaviour
         }
 
         EnsureTabBarUI();
+        EnsureItemDetailsUI();
         EnsureCreatureTabUI();
         EnsurePlaceholderTabUI();
         ApplyPanelBackdropBlur();
         ApplyInventoryPanelLayout();
         SwitchTab(activeTab);
+
+        if (selectedInventorySlot == null && hotbarSlots != null && hotbarSlots.Length > 0)
+        {
+            selectedInventorySlot = hotbarSlots[Mathf.Clamp(selectedHotbarIndex, 0, hotbarSlots.Length - 1)];
+        }
 
         if (panelRoot != null)
         {
@@ -342,7 +408,8 @@ public class InventoryUI : MonoBehaviour
                 InventorySlot slot = inventory.GetHotbarSlot(i);
                 hotbarSlots[i].SetData(slot);
                 ResizeSlotVisuals(hotbarSlots[i]);
-                ApplyHotbarSelection(hotbarSlots[i], i == selectedHotbarIndex);
+                bool isSelectedSlot = ReferenceEquals(hotbarSlots[i], selectedInventorySlot);
+                ApplyHotbarSelection(hotbarSlots[i], isSelectedSlot);
             }
         }
 
@@ -353,9 +420,12 @@ public class InventoryUI : MonoBehaviour
                 InventorySlot slot = inventory.GetBagSlot(i);
                 bagSlots[i].SetData(slot);
                 ResizeSlotVisuals(bagSlots[i]);
+                bool isSelectedSlot = ReferenceEquals(bagSlots[i], selectedInventorySlot);
+                ApplyHotbarSelection(bagSlots[i], isSelectedSlot);
             }
         }
 
+        RefreshSelectedItemDetails();
         RefreshCreatureTab();
         ApplyInventoryPanelLayout();
         UpdateTabButtonStates();
@@ -371,24 +441,34 @@ public class InventoryUI : MonoBehaviour
         slot.background.preserveAspect = false;
     }
 
+    public void OnInventorySlotClicked(InventorySlotUI slot)
+    {
+        if (slot == null) return;
+        selectedInventorySlot = slot;
+        if (slot.isHotbar)
+        {
+            selectedHotbarIndex = Mathf.Clamp(slot.index, 0, Mathf.Max(0, inventory != null && inventory.hotbar != null ? inventory.hotbar.Length - 1 : 0));
+        }
+        Refresh();
+    }
+
     public void SelectHotbar(int index)
     {
         selectedHotbarIndex = Mathf.Clamp(index, 0, inventory.hotbar.Length - 1);
+        if (hotbarSlots != null && hotbarSlots.Length > 0)
+        {
+            selectedInventorySlot = hotbarSlots[selectedHotbarIndex];
+        }
         Refresh();
     }
 
     public void BeginDrag(InventorySlotUI slot)
     {
+        if (dragMode != DragMode.None && dragMode != DragMode.Item) return;
         if (slot == null || slot.data == null || slot.data.IsEmpty()) return;
         draggingFrom = slot;
-
-        if (draggingIcon == null)
-        {
-            GameObject go = new GameObject("DraggingIcon");
-            go.transform.SetParent(transform, false);
-            draggingIcon = go.AddComponent<Image>();
-            draggingIcon.raycastTarget = false;
-        }
+        dragMode = DragMode.Item;
+        EnsureDraggingIcon();
 
         draggingIcon.transform.SetAsLastSibling();
         draggingIcon.sprite = slot.icon.sprite;
@@ -401,6 +481,7 @@ public class InventoryUI : MonoBehaviour
 
     public void EndDrag(InventorySlotUI slot)
     {
+        if (dragMode != DragMode.Item) return;
         if (draggingIcon != null)
         {
             draggingIcon.gameObject.SetActive(false);
@@ -411,16 +492,19 @@ public class InventoryUI : MonoBehaviour
         if (slot == null || slot == draggingFrom)
         {
             draggingFrom = null;
+            dragMode = DragMode.None;
             return;
         }
 
         SwapSlots(draggingFrom, slot);
         draggingFrom = null;
+        dragMode = DragMode.None;
+        Refresh();
     }
 
     public bool HasActiveDrag()
     {
-        return draggingFrom != null;
+        return dragMode == DragMode.Item && draggingFrom != null;
     }
 
     public InventorySlotUI GetDragSource()
@@ -560,6 +644,407 @@ public class InventoryUI : MonoBehaviour
                 iconRt.sizeDelta = new Vector2(displayIconSize, displayIconSize);
             }
         }
+    }
+
+    void EnsureItemDetailsUI()
+    {
+        if (panelRoot == null) return;
+
+        Transform existing = panelRoot.Find("ItemDetailsRoot");
+        if (existing == null)
+        {
+            GameObject go = new GameObject("ItemDetailsRoot", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(panelRoot, false);
+            existing = go.transform;
+        }
+
+        itemDetailsRoot = existing as RectTransform;
+        Image bg = existing.GetComponent<Image>();
+        bg.sprite = slotSprite;
+        bg.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+        bg.color = new Color(0f, 0f, 0f, 0.45f);
+        bg.raycastTarget = false;
+
+        Transform iconTf = itemDetailsRoot.Find("ItemIcon");
+        if (iconTf == null)
+        {
+            GameObject go = new GameObject("ItemIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(itemDetailsRoot, false);
+            iconTf = go.transform;
+        }
+        itemDetailsIcon = iconTf.GetComponent<Image>();
+        itemDetailsIcon.preserveAspect = true;
+        itemDetailsIcon.color = Color.white;
+
+        Transform nameTf = itemDetailsRoot.Find("ItemName");
+        if (nameTf == null)
+        {
+            GameObject go = new GameObject("ItemName", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(itemDetailsRoot, false);
+            nameTf = go.transform;
+        }
+        itemDetailsNameText = nameTf.GetComponent<Text>();
+        itemDetailsNameText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        itemDetailsNameText.fontSize = 20;
+        itemDetailsNameText.fontStyle = FontStyle.Bold;
+        itemDetailsNameText.alignment = TextAnchor.UpperLeft;
+        itemDetailsNameText.color = Color.white;
+
+        Transform countTf = itemDetailsRoot.Find("ItemCount");
+        if (countTf == null)
+        {
+            GameObject go = new GameObject("ItemCount", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(itemDetailsRoot, false);
+            countTf = go.transform;
+        }
+        itemDetailsCountText = countTf.GetComponent<Text>();
+        itemDetailsCountText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        itemDetailsCountText.fontSize = 16;
+        itemDetailsCountText.alignment = TextAnchor.UpperLeft;
+        itemDetailsCountText.color = Color.white;
+
+        itemUseButton = EnsureItemActionButton(itemDetailsRoot, "UseButton", "Use", OnUseSelectedItem);
+        itemDropButton = EnsureItemActionButton(itemDetailsRoot, "DropButton", "Drop", OnDropSelectedItem);
+        itemDiscardButton = EnsureItemActionButton(itemDetailsRoot, "DiscardButton", "Discard", OnDiscardSelectedItem);
+    }
+
+    Button EnsureItemActionButton(Transform parent, string name, string label, UnityEngine.Events.UnityAction action)
+    {
+        Transform existing = parent.Find(name);
+        if (existing == null)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button), typeof(LayoutElement));
+            go.transform.SetParent(parent, false);
+            existing = go.transform;
+        }
+
+        Image bg = existing.GetComponent<Image>();
+        bg.sprite = slotSprite;
+        bg.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+        bg.color = new Color(0.18f, 0.18f, 0.2f, 0.95f);
+
+        LayoutElement le = existing.GetComponent<LayoutElement>();
+        le.preferredWidth = 118f;
+        le.preferredHeight = 36f;
+
+        Button button = existing.GetComponent<Button>();
+        button.onClick.RemoveAllListeners();
+        button.onClick.AddListener(action);
+
+        Transform textTf = existing.Find("Text");
+        if (textTf == null)
+        {
+            GameObject go = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(existing, false);
+            textTf = go.transform;
+        }
+        Text t = textTf.GetComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.fontSize = 16;
+        t.fontStyle = FontStyle.Bold;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = Color.white;
+        t.text = label;
+        RectTransform trt = t.rectTransform;
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = Vector2.zero;
+        trt.offsetMax = Vector2.zero;
+        return button;
+    }
+
+    void RefreshSelectedItemDetails()
+    {
+        if (itemDetailsRoot == null) return;
+
+        bool show = activeTab == InventoryTab.Items;
+        itemDetailsRoot.gameObject.SetActive(show);
+        if (!show) return;
+
+        InventorySlot slot = selectedInventorySlot != null ? selectedInventorySlot.data : null;
+        bool hasItem = slot != null && !slot.IsEmpty() && slot.item != null;
+
+        if (itemDetailsIcon != null)
+        {
+            itemDetailsIcon.sprite = hasItem ? slot.item.icon : null;
+            itemDetailsIcon.enabled = itemDetailsIcon.sprite != null;
+        }
+        if (itemDetailsNameText != null)
+        {
+            itemDetailsNameText.text = hasItem ? slot.item.displayName : "No item selected";
+        }
+        if (itemDetailsCountText != null)
+        {
+            itemDetailsCountText.text = hasItem ? ("x " + Mathf.Max(0, slot.count)) : string.Empty;
+        }
+
+        if (itemUseButton != null) itemUseButton.interactable = hasItem;
+        if (itemDropButton != null) itemDropButton.interactable = hasItem;
+        if (itemDiscardButton != null) itemDiscardButton.interactable = hasItem;
+    }
+
+    void OnUseSelectedItem()
+    {
+        InventorySlot slot = selectedInventorySlot != null ? selectedInventorySlot.data : null;
+        if (slot == null || slot.IsEmpty() || slot.item == null) return;
+        Debug.Log("InventoryUI: Use action selected for " + slot.item.displayName + " (not implemented).");
+    }
+
+    void OnDropSelectedItem()
+    {
+        InventorySlot slot = selectedInventorySlot != null ? selectedInventorySlot.data : null;
+        if (slot == null || slot.IsEmpty()) return;
+        slot.count = Mathf.Max(0, slot.count - 1);
+        if (slot.count <= 0) slot.Clear();
+        inventory.NotifyChanged();
+    }
+
+    void OnDiscardSelectedItem()
+    {
+        InventorySlot slot = selectedInventorySlot != null ? selectedInventorySlot.data : null;
+        if (slot == null || slot.IsEmpty()) return;
+        slot.Clear();
+        inventory.NotifyChanged();
+    }
+
+    public bool HasActiveCreatureDrag()
+    {
+        return dragMode == DragMode.CreatureStorage || dragMode == DragMode.CreatureParty;
+    }
+
+    public void BeginCreatureDragFromStorage(CreatureStorageSlotUI slot)
+    {
+        if (slot == null) return;
+        if (dragMode != DragMode.None && dragMode != DragMode.CreatureStorage && dragMode != DragMode.CreatureParty) return;
+        EnsureCreatureSources();
+        if (storage == null) return;
+
+        int globalIndex = (creaturePageIndex * CreatureSlotsPerPage) + slot.pageLocalIndex;
+        CreatureInstance moving = storage.GetAt(globalIndex);
+        if (moving == null) return;
+
+        dragMode = DragMode.CreatureStorage;
+        draggingCreatureStorageIndex = globalIndex;
+        draggingCreaturePartyIndex = -1;
+
+        EnsureDraggingIcon();
+        draggingIcon.transform.SetAsLastSibling();
+        draggingIcon.sprite = slot.icon != null ? slot.icon.sprite : null;
+        draggingIcon.color = Color.white;
+        draggingIcon.rectTransform.sizeDelta = new Vector2(Mathf.RoundToInt(slotSize * 0.9f), Mathf.RoundToInt(slotSize * 0.9f));
+        draggingIcon.gameObject.SetActive(draggingIcon.sprite != null);
+        UpdateDraggingIconPosition(Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero);
+    }
+
+    public void BeginCreatureDragFromParty(CreaturePartySlotUI slot)
+    {
+        if (slot == null) return;
+        if (dragMode != DragMode.None && dragMode != DragMode.CreatureStorage && dragMode != DragMode.CreatureParty) return;
+        EnsureCreatureSources();
+        if (party == null) return;
+
+        CreatureInstance moving = party.GetCreatureAt(slot.partyIndex);
+        if (moving == null) return;
+
+        dragMode = DragMode.CreatureParty;
+        draggingCreaturePartyIndex = slot.partyIndex;
+        draggingCreatureStorageIndex = -1;
+
+        EnsureDraggingIcon();
+        draggingIcon.transform.SetAsLastSibling();
+        draggingIcon.sprite = slot.icon != null ? slot.icon.sprite : null;
+        draggingIcon.color = Color.white;
+        draggingIcon.rectTransform.sizeDelta = new Vector2(Mathf.RoundToInt(slotSize * 0.9f), Mathf.RoundToInt(slotSize * 0.9f));
+        draggingIcon.gameObject.SetActive(draggingIcon.sprite != null);
+        UpdateDraggingIconPosition(Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero);
+    }
+
+    public void DropCreatureOnStorageSlot(int pageLocalIndex)
+    {
+        if (!HasActiveCreatureDrag()) return;
+        EnsureCreatureSources();
+        if (storage == null || party == null)
+        {
+            EndCreatureDrag();
+            return;
+        }
+
+        int targetStorageIndex = (creaturePageIndex * CreatureSlotsPerPage) + pageLocalIndex;
+        if (targetStorageIndex < 0 || targetStorageIndex >= storage.Capacity)
+        {
+            EndCreatureDrag();
+            return;
+        }
+
+        if (dragMode == DragMode.CreatureStorage)
+        {
+            int sourceIndex = draggingCreatureStorageIndex;
+            if (sourceIndex == targetStorageIndex)
+            {
+                EndCreatureDrag();
+                return;
+            }
+
+            CreatureInstance moving;
+            if (!storage.TryTakeAt(sourceIndex, out moving) || moving == null)
+            {
+                EndCreatureDrag();
+                return;
+            }
+
+            CreatureInstance replaced;
+            if (!storage.TrySetAt(targetStorageIndex, moving, out replaced))
+            {
+                storage.TrySetAt(sourceIndex, moving, out _);
+                EndCreatureDrag();
+                return;
+            }
+
+            if (replaced != null)
+            {
+                storage.TrySetAt(sourceIndex, replaced, out _);
+            }
+
+            selectedCreatureFromParty = false;
+            selectedCreatureStorageIndex = targetStorageIndex;
+            selectedCreaturePartyIndex = -1;
+        }
+        else if (dragMode == DragMode.CreatureParty)
+        {
+            int sourcePartyIndex = draggingCreaturePartyIndex;
+            CreatureInstance moving;
+            if (!party.TryTakeCreatureAtSlot(sourcePartyIndex, out moving) || moving == null)
+            {
+                EndCreatureDrag();
+                return;
+            }
+
+            CreatureInstance replaced;
+            if (!storage.TrySetAt(targetStorageIndex, moving, out replaced))
+            {
+                party.TrySetCreatureAtSlot(sourcePartyIndex, moving, out _);
+                EndCreatureDrag();
+                return;
+            }
+
+            if (replaced != null)
+            {
+                CreatureInstance displaced;
+                if (!party.TrySetCreatureAtSlot(sourcePartyIndex, replaced, out displaced))
+                {
+                    storage.TryStoreCreature(replaced);
+                }
+                else if (displaced != null)
+                {
+                    storage.TryStoreCreature(displaced);
+                }
+            }
+
+            selectedCreatureFromParty = false;
+            selectedCreatureStorageIndex = targetStorageIndex;
+            selectedCreaturePartyIndex = -1;
+        }
+
+        EndCreatureDrag();
+        RefreshCreatureTab();
+    }
+
+    public void DropCreatureOnPartySlot(int targetPartyIndex)
+    {
+        if (!HasActiveCreatureDrag()) return;
+        EnsureCreatureSources();
+        if (storage == null || party == null)
+        {
+            EndCreatureDrag();
+            return;
+        }
+
+        if (targetPartyIndex < 0 || targetPartyIndex >= PlayerCreatureParty.MaxPartySize)
+        {
+            EndCreatureDrag();
+            return;
+        }
+
+        if (dragMode == DragMode.CreatureStorage)
+        {
+            int sourceStorageIndex = draggingCreatureStorageIndex;
+            CreatureInstance moving;
+            if (!storage.TryTakeAt(sourceStorageIndex, out moving) || moving == null)
+            {
+                EndCreatureDrag();
+                return;
+            }
+
+            CreatureInstance replaced;
+            if (!party.TrySetCreatureAtSlot(targetPartyIndex, moving, out replaced))
+            {
+                storage.TrySetAt(sourceStorageIndex, moving, out _);
+                EndCreatureDrag();
+                return;
+            }
+
+            if (replaced != null)
+            {
+                storage.TrySetAt(sourceStorageIndex, replaced, out _);
+            }
+
+            selectedCreatureFromParty = true;
+            selectedCreaturePartyIndex = Mathf.Clamp(targetPartyIndex, 0, PlayerCreatureParty.MaxPartySize - 1);
+            selectedCreatureStorageIndex = -1;
+        }
+        else if (dragMode == DragMode.CreatureParty)
+        {
+            int sourcePartyIndex = draggingCreaturePartyIndex;
+            if (sourcePartyIndex == targetPartyIndex)
+            {
+                EndCreatureDrag();
+                return;
+            }
+
+            CreatureInstance moving;
+            if (!party.TryTakeCreatureAtSlot(sourcePartyIndex, out moving) || moving == null)
+            {
+                EndCreatureDrag();
+                return;
+            }
+
+            CreatureInstance replaced;
+            if (!party.TrySetCreatureAtSlot(targetPartyIndex, moving, out replaced))
+            {
+                party.TrySetCreatureAtSlot(sourcePartyIndex, moving, out _);
+                EndCreatureDrag();
+                return;
+            }
+
+            if (replaced != null)
+            {
+                CreatureInstance displaced;
+                if (!party.TrySetCreatureAtSlot(sourcePartyIndex, replaced, out displaced))
+                {
+                    storage.TryStoreCreature(replaced);
+                }
+                else if (displaced != null)
+                {
+                    storage.TryStoreCreature(displaced);
+                }
+            }
+
+            selectedCreatureFromParty = true;
+            selectedCreaturePartyIndex = Mathf.Clamp(targetPartyIndex, 0, PlayerCreatureParty.MaxPartySize - 1);
+            selectedCreatureStorageIndex = -1;
+        }
+
+        EndCreatureDrag();
+        RefreshCreatureTab();
+    }
+
+    public void EndCreatureDrag()
+    {
+        if (!HasActiveCreatureDrag()) return;
+        dragMode = DragMode.None;
+        draggingCreatureStorageIndex = -1;
+        draggingCreaturePartyIndex = -1;
+        if (draggingIcon != null) draggingIcon.gameObject.SetActive(false);
     }
 
     void EnsureCreatureSources()
@@ -738,11 +1223,40 @@ public class InventoryUI : MonoBehaviour
         creatureTabRoot.anchorMax = new Vector2(0.5f, 1f);
         creatureTabRoot.pivot = new Vector2(0.5f, 1f);
 
-        Transform gridTf = creatureTabRoot.Find("CreatureGrid");
+        Transform leftColumnTf = creatureTabRoot.Find("LeftColumn");
+        if (leftColumnTf == null)
+        {
+            GameObject go = new GameObject("LeftColumn", typeof(RectTransform), typeof(CanvasRenderer), typeof(VerticalLayoutGroup));
+            go.transform.SetParent(creatureTabRoot, false);
+            leftColumnTf = go.transform;
+        }
+        RectTransform leftColumnRt = leftColumnTf as RectTransform;
+        VerticalLayoutGroup leftLayout = leftColumnTf.GetComponent<VerticalLayoutGroup>();
+        leftLayout.spacing = 10f;
+        leftLayout.childAlignment = TextAnchor.UpperLeft;
+        leftLayout.childControlWidth = false;
+        leftLayout.childControlHeight = false;
+        leftLayout.childForceExpandWidth = false;
+        leftLayout.childForceExpandHeight = false;
+
+        Transform rightPanelTf = creatureTabRoot.Find("RightPanel");
+        if (rightPanelTf == null)
+        {
+            GameObject go = new GameObject("RightPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(creatureTabRoot, false);
+            rightPanelTf = go.transform;
+        }
+        creatureRightPanelRoot = rightPanelTf as RectTransform;
+        Image rightPanelBg = rightPanelTf.GetComponent<Image>();
+        rightPanelBg.sprite = slotSprite;
+        rightPanelBg.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+        rightPanelBg.color = new Color(0f, 0f, 0f, 0.38f);
+
+        Transform gridTf = leftColumnTf.Find("CreatureGrid");
         if (gridTf == null)
         {
             GameObject go = new GameObject("CreatureGrid", typeof(RectTransform), typeof(CanvasRenderer), typeof(GridLayoutGroup));
-            go.transform.SetParent(creatureTabRoot, false);
+            go.transform.SetParent(leftColumnTf, false);
             gridTf = go.transform;
         }
         creatureGridRoot = gridTf as RectTransform;
@@ -752,7 +1266,7 @@ public class InventoryUI : MonoBehaviour
         grid.constraintCount = 5;
         grid.cellSize = new Vector2(slotSize, slotSize);
         grid.spacing = new Vector2(inventoryMenuSlotSpacing, inventoryMenuSlotSpacing);
-        grid.childAlignment = TextAnchor.MiddleCenter;
+        grid.childAlignment = TextAnchor.UpperLeft;
 
         if (creatureSlots == null || creatureSlots.Length != CreatureSlotsPerPage)
         {
@@ -771,12 +1285,20 @@ public class InventoryUI : MonoBehaviour
 
             CreatureStorageSlotUI view = slotTf.GetComponent<CreatureStorageSlotUI>();
             if (view == null) view = slotTf.gameObject.AddComponent<CreatureStorageSlotUI>();
+            view.ui = this;
+            view.pageLocalIndex = i;
 
             Image bg = slotTf.GetComponent<Image>();
             bg.sprite = slotSprite;
             bg.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
             bg.color = normalColor;
             view.background = bg;
+
+            Button slotButton = slotTf.GetComponent<Button>();
+            if (slotButton == null) slotButton = slotTf.gameObject.AddComponent<Button>();
+            slotButton.onClick.RemoveAllListeners();
+            int capturedIndex = i;
+            slotButton.onClick.AddListener(() => OnCreatureStorageSlotClicked(capturedIndex));
 
             Transform iconTf = slotTf.Find("Icon");
             if (iconTf == null)
@@ -836,11 +1358,11 @@ public class InventoryUI : MonoBehaviour
             creatureSlots[i] = view;
         }
 
-        Transform pagerTf = creatureTabRoot.Find("CreaturePager");
+        Transform pagerTf = leftColumnTf.Find("CreaturePager");
         if (pagerTf == null)
         {
             GameObject go = new GameObject("CreaturePager", typeof(RectTransform), typeof(CanvasRenderer), typeof(HorizontalLayoutGroup));
-            go.transform.SetParent(creatureTabRoot, false);
+            go.transform.SetParent(leftColumnTf, false);
             pagerTf = go.transform;
         }
         creaturePagerRoot = pagerTf as RectTransform;
@@ -855,6 +1377,275 @@ public class InventoryUI : MonoBehaviour
         creaturePrevPageButton = EnsurePagerButton(pagerTf, "Prev", "<", OnPrevCreaturePage);
         creaturePageLabel = EnsurePagerLabel(pagerTf, "PageLabel");
         creatureNextPageButton = EnsurePagerButton(pagerTf, "Next", ">", OnNextCreaturePage);
+
+        EnsureCreaturePartySlotsUI();
+        EnsureCreatureDetailsUI();
+    }
+
+    void EnsureCreaturePartySlotsUI()
+    {
+        if (creatureRightPanelRoot == null) return;
+
+        Transform partyTf = creatureRightPanelRoot.Find("PartySlotsRoot");
+        if (partyTf == null)
+        {
+            GameObject go = new GameObject("PartySlotsRoot", typeof(RectTransform), typeof(CanvasRenderer), typeof(GridLayoutGroup));
+            go.transform.SetParent(creatureRightPanelRoot, false);
+            partyTf = go.transform;
+        }
+
+        RectTransform partyRt = partyTf as RectTransform;
+        GridLayoutGroup partyGrid = partyTf.GetComponent<GridLayoutGroup>();
+        partyGrid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        partyGrid.constraintCount = 3;
+        partyGrid.childAlignment = TextAnchor.UpperLeft;
+        partyGrid.spacing = new Vector2(6f, 6f);
+        partyGrid.cellSize = new Vector2(86f, 78f);
+
+        if (creaturePartySlots == null || creaturePartySlots.Length != PlayerCreatureParty.MaxPartySize)
+        {
+            creaturePartySlots = new CreaturePartySlotUI[PlayerCreatureParty.MaxPartySize];
+        }
+
+        for (int i = 0; i < PlayerCreatureParty.MaxPartySize; i++)
+        {
+            Transform slotTf = partyTf.Find("PartySlot" + (i + 1));
+            if (slotTf == null)
+            {
+                GameObject slotGo = new GameObject("PartySlot" + (i + 1), typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                slotGo.transform.SetParent(partyTf, false);
+                slotTf = slotGo.transform;
+            }
+
+            CreaturePartySlotUI view = slotTf.GetComponent<CreaturePartySlotUI>();
+            if (view == null) view = slotTf.gameObject.AddComponent<CreaturePartySlotUI>();
+            view.ui = this;
+            view.partyIndex = i;
+            view.background = slotTf.GetComponent<Image>();
+            view.background.sprite = slotSprite;
+            view.background.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+            view.background.color = normalColor;
+
+            Button button = slotTf.GetComponent<Button>();
+            button.onClick.RemoveAllListeners();
+            int capturedIndex = i;
+            button.onClick.AddListener(() => OnCreaturePartySlotClicked(capturedIndex));
+
+            Transform iconTf = slotTf.Find("Icon");
+            if (iconTf == null)
+            {
+                GameObject go = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                go.transform.SetParent(slotTf, false);
+                iconTf = go.transform;
+            }
+            view.icon = iconTf.GetComponent<Image>();
+            view.icon.preserveAspect = true;
+            view.icon.color = Color.white;
+            RectTransform iconRt = view.icon.rectTransform;
+            iconRt.anchorMin = new Vector2(0.5f, 0.58f);
+            iconRt.anchorMax = new Vector2(0.5f, 0.58f);
+            iconRt.pivot = new Vector2(0.5f, 0.5f);
+            iconRt.sizeDelta = new Vector2(54f, 54f);
+
+            Transform levelTf = slotTf.Find("Level");
+            if (levelTf == null)
+            {
+                GameObject go = new GameObject("Level", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+                go.transform.SetParent(slotTf, false);
+                levelTf = go.transform;
+            }
+            view.levelText = levelTf.GetComponent<Text>();
+            view.levelText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            view.levelText.fontSize = 11;
+            view.levelText.alignment = TextAnchor.UpperRight;
+            view.levelText.color = Color.white;
+            RectTransform lvlRt = view.levelText.rectTransform;
+            lvlRt.anchorMin = new Vector2(0f, 0.76f);
+            lvlRt.anchorMax = new Vector2(1f, 1f);
+            lvlRt.offsetMin = new Vector2(2f, 0f);
+            lvlRt.offsetMax = new Vector2(-2f, -2f);
+
+            creaturePartySlots[i] = view;
+        }
+
+        partyRt.anchorMin = new Vector2(0f, 1f);
+        partyRt.anchorMax = new Vector2(0f, 1f);
+        partyRt.pivot = new Vector2(0f, 1f);
+    }
+
+    void EnsureCreatureDetailsUI()
+    {
+        if (creatureRightPanelRoot == null) return;
+
+        Transform detailsTf = creatureRightPanelRoot.Find("DetailsRoot");
+        if (detailsTf == null)
+        {
+            GameObject go = new GameObject("DetailsRoot", typeof(RectTransform), typeof(CanvasRenderer));
+            go.transform.SetParent(creatureRightPanelRoot, false);
+            detailsTf = go.transform;
+        }
+        creatureDetailsRoot = detailsTf as RectTransform;
+
+        Transform spriteTf = creatureDetailsRoot.Find("Sprite");
+        if (spriteTf == null)
+        {
+            GameObject go = new GameObject("Sprite", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(creatureDetailsRoot, false);
+            spriteTf = go.transform;
+        }
+        creatureDetailSprite = spriteTf.GetComponent<Image>();
+        creatureDetailSprite.preserveAspect = true;
+        creatureDetailSprite.color = Color.white;
+
+        creatureDetailNameText = EnsureDetailText(creatureDetailsRoot, "Name", 18, TextAnchor.UpperLeft, FontStyle.Bold);
+        creatureDetailTypesText = EnsureDetailText(creatureDetailsRoot, "Types", 14, TextAnchor.UpperLeft, FontStyle.Normal);
+        creatureDetailHpText = EnsureDetailText(creatureDetailsRoot, "HPText", 13, TextAnchor.MiddleLeft, FontStyle.Bold);
+        creatureDetailXpText = EnsureDetailText(creatureDetailsRoot, "XPText", 13, TextAnchor.MiddleLeft, FontStyle.Bold);
+        creatureDetailBodyText = EnsureDetailText(creatureDetailsRoot, "BodyText", 13, TextAnchor.UpperLeft, FontStyle.Normal);
+        creatureDetailBodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        creatureDetailBodyText.verticalOverflow = VerticalWrapMode.Overflow;
+
+        EnsureCreatureDetailBars();
+        EnsureCreatureDetailSubTabs();
+    }
+
+    Text EnsureDetailText(RectTransform parent, string name, int fontSize, TextAnchor anchor, FontStyle style)
+    {
+        Transform tf = parent.Find(name);
+        if (tf == null)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(parent, false);
+            tf = go.transform;
+        }
+        Text t = tf.GetComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.fontSize = fontSize;
+        t.alignment = anchor;
+        t.fontStyle = style;
+        t.color = Color.white;
+        return t;
+    }
+
+    void EnsureCreatureDetailBars()
+    {
+        Transform hpBgTf = creatureDetailsRoot.Find("HPBarBG");
+        if (hpBgTf == null)
+        {
+            GameObject go = new GameObject("HPBarBG", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(creatureDetailsRoot, false);
+            hpBgTf = go.transform;
+        }
+        creatureDetailHpBg = hpBgTf.GetComponent<Image>();
+        creatureDetailHpBg.sprite = CreateSolidSprite();
+        creatureDetailHpBg.type = Image.Type.Simple;
+        creatureDetailHpBg.color = new Color(0f, 0f, 0f, 0.85f);
+
+        Transform hpFillTf = hpBgTf.Find("Fill");
+        if (hpFillTf == null)
+        {
+            GameObject go = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(hpBgTf, false);
+            hpFillTf = go.transform;
+        }
+        creatureDetailHpFill = hpFillTf.GetComponent<Image>();
+        creatureDetailHpFill.sprite = CreateSolidSprite();
+        creatureDetailHpFill.type = Image.Type.Filled;
+        creatureDetailHpFill.fillMethod = Image.FillMethod.Horizontal;
+        creatureDetailHpFill.fillOrigin = 0;
+
+        Transform xpBgTf = creatureDetailsRoot.Find("XPBarBG");
+        if (xpBgTf == null)
+        {
+            GameObject go = new GameObject("XPBarBG", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(creatureDetailsRoot, false);
+            xpBgTf = go.transform;
+        }
+        creatureDetailXpBg = xpBgTf.GetComponent<Image>();
+        creatureDetailXpBg.sprite = CreateSolidSprite();
+        creatureDetailXpBg.type = Image.Type.Simple;
+        creatureDetailXpBg.color = new Color(0f, 0f, 0f, 0.85f);
+
+        Transform xpFillTf = xpBgTf.Find("Fill");
+        if (xpFillTf == null)
+        {
+            GameObject go = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(xpBgTf, false);
+            xpFillTf = go.transform;
+        }
+        creatureDetailXpFill = xpFillTf.GetComponent<Image>();
+        creatureDetailXpFill.sprite = CreateSolidSprite();
+        creatureDetailXpFill.type = Image.Type.Filled;
+        creatureDetailXpFill.fillMethod = Image.FillMethod.Horizontal;
+        creatureDetailXpFill.fillOrigin = 0;
+        creatureDetailXpFill.color = new Color(0.20f, 0.63f, 0.96f, 1f);
+    }
+
+    void EnsureCreatureDetailSubTabs()
+    {
+        Transform tabsTf = creatureDetailsRoot.Find("SubTabs");
+        if (tabsTf == null)
+        {
+            GameObject go = new GameObject("SubTabs", typeof(RectTransform), typeof(CanvasRenderer), typeof(HorizontalLayoutGroup));
+            go.transform.SetParent(creatureDetailsRoot, false);
+            tabsTf = go.transform;
+        }
+        creatureSubTabsRoot = tabsTf as RectTransform;
+        HorizontalLayoutGroup layout = tabsTf.GetComponent<HorizontalLayoutGroup>();
+        layout.spacing = 6f;
+        layout.childAlignment = TextAnchor.MiddleLeft;
+        layout.childControlWidth = false;
+        layout.childControlHeight = false;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = false;
+
+        creatureSummaryTabButton = EnsureCreatureSubTabButton(tabsTf, "SummaryTab", "Summary", CreatureDetailSubTab.Summary);
+        creatureAttacksTabButton = EnsureCreatureSubTabButton(tabsTf, "AttacksTab", "Attacks", CreatureDetailSubTab.Attacks);
+        creatureSoulTraitsTabButton = EnsureCreatureSubTabButton(tabsTf, "SoulTraitsTab", "Soul Traits", CreatureDetailSubTab.SoulTraits);
+    }
+
+    Button EnsureCreatureSubTabButton(Transform parent, string name, string label, CreatureDetailSubTab tab)
+    {
+        Transform tf = parent.Find(name);
+        if (tf == null)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button), typeof(LayoutElement));
+            go.transform.SetParent(parent, false);
+            tf = go.transform;
+        }
+
+        Image bg = tf.GetComponent<Image>();
+        bg.sprite = slotSprite;
+        bg.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+        bg.color = new Color(0.20f, 0.20f, 0.24f, 0.95f);
+
+        LayoutElement le = tf.GetComponent<LayoutElement>();
+        le.preferredWidth = name == "SoulTraitsTab" ? 110f : 84f;
+        le.preferredHeight = 30f;
+
+        Button b = tf.GetComponent<Button>();
+        b.onClick.RemoveAllListeners();
+        b.onClick.AddListener(() => SetCreatureDetailSubTab(tab));
+
+        Transform labelTf = tf.Find("Text");
+        if (labelTf == null)
+        {
+            GameObject go = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(tf, false);
+            labelTf = go.transform;
+        }
+        Text t = labelTf.GetComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.fontSize = 12;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = Color.white;
+        t.text = label;
+        RectTransform trt = t.rectTransform;
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = Vector2.zero;
+        trt.offsetMax = Vector2.zero;
+        return b;
     }
 
     void EnsurePlaceholderTabUI()
@@ -1036,19 +1827,93 @@ public class InventoryUI : MonoBehaviour
             bagRoot.sizeDelta = new Vector2(gridW, gridH);
         }
 
+        if (itemDetailsRoot != null)
+        {
+            itemDetailsRoot.anchorMin = new Vector2(0.5f, 0f);
+            itemDetailsRoot.anchorMax = new Vector2(0.5f, 0f);
+            itemDetailsRoot.pivot = new Vector2(0.5f, 0f);
+            float detailsHeight = Mathf.Max(120f, extraBelow + 24f);
+            itemDetailsRoot.anchoredPosition = new Vector2(0f, 14f);
+            itemDetailsRoot.sizeDelta = new Vector2(gridW + 32f, detailsHeight);
+
+            if (itemDetailsIcon != null)
+            {
+                RectTransform rt = itemDetailsIcon.rectTransform;
+                rt.anchorMin = new Vector2(0f, 0f);
+                rt.anchorMax = new Vector2(0f, 0f);
+                rt.pivot = new Vector2(0f, 0f);
+                rt.anchoredPosition = new Vector2(16f, 14f);
+                float iconLarge = Mathf.Max(96f, slotSize * 1.35f);
+                rt.sizeDelta = new Vector2(iconLarge, iconLarge);
+            }
+            if (itemDetailsNameText != null)
+            {
+                RectTransform rt = itemDetailsNameText.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(136f, -10f);
+                rt.sizeDelta = new Vector2(-152f, 34f);
+            }
+            if (itemDetailsCountText != null)
+            {
+                RectTransform rt = itemDetailsCountText.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(136f, -42f);
+                rt.sizeDelta = new Vector2(-152f, 26f);
+            }
+
+            float buttonY = 20f;
+            if (itemUseButton != null)
+            {
+                RectTransform rt = itemUseButton.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0f, 0f);
+                rt.anchorMax = new Vector2(0f, 0f);
+                rt.pivot = new Vector2(0f, 0f);
+                rt.anchoredPosition = new Vector2(136f, buttonY);
+            }
+            if (itemDropButton != null)
+            {
+                RectTransform rt = itemDropButton.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0f, 0f);
+                rt.anchorMax = new Vector2(0f, 0f);
+                rt.pivot = new Vector2(0f, 0f);
+                rt.anchoredPosition = new Vector2(264f, buttonY);
+            }
+            if (itemDiscardButton != null)
+            {
+                RectTransform rt = itemDiscardButton.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0f, 0f);
+                rt.anchorMax = new Vector2(0f, 0f);
+                rt.pivot = new Vector2(0f, 0f);
+                rt.anchoredPosition = new Vector2(392f, buttonY);
+            }
+        }
+
         if (creatureTabRoot != null)
         {
             creatureTabRoot.sizeDelta = new Vector2(panelW - 48f, panelH - (tabH + 40f));
             creatureTabRoot.anchoredPosition = new Vector2(0f, -(tabH + 18f));
         }
 
+        RectTransform leftColumnRt = creatureGridRoot != null ? creatureGridRoot.transform.parent as RectTransform : null;
+        if (leftColumnRt != null && creatureTabRoot != null)
+        {
+            leftColumnRt.anchorMin = new Vector2(0f, 1f);
+            leftColumnRt.anchorMax = new Vector2(0f, 1f);
+            leftColumnRt.pivot = new Vector2(0f, 1f);
+            leftColumnRt.anchoredPosition = Vector2.zero;
+        }
+
         if (creatureGridRoot != null)
         {
             float creatureGridW = (5 * slotSize) + (4 * gap);
             float creatureGridH = (5 * slotSize) + (4 * gap);
-            creatureGridRoot.anchorMin = new Vector2(0.5f, 1f);
-            creatureGridRoot.anchorMax = new Vector2(0.5f, 1f);
-            creatureGridRoot.pivot = new Vector2(0.5f, 1f);
+            creatureGridRoot.anchorMin = new Vector2(0f, 1f);
+            creatureGridRoot.anchorMax = new Vector2(0f, 1f);
+            creatureGridRoot.pivot = new Vector2(0f, 1f);
             creatureGridRoot.anchoredPosition = Vector2.zero;
             creatureGridRoot.sizeDelta = new Vector2(creatureGridW, creatureGridH);
 
@@ -1058,16 +1923,152 @@ public class InventoryUI : MonoBehaviour
                 grid.cellSize = new Vector2(slotSize, slotSize);
                 grid.spacing = new Vector2(gap, gap);
             }
+
+            if (leftColumnRt != null)
+            {
+                leftColumnRt.sizeDelta = new Vector2(creatureGridW, creatureGridH + 52f);
+            }
         }
 
         if (creaturePagerRoot != null)
         {
-            creaturePagerRoot.anchorMin = new Vector2(0.5f, 1f);
-            creaturePagerRoot.anchorMax = new Vector2(0.5f, 1f);
-            creaturePagerRoot.pivot = new Vector2(0.5f, 1f);
-            float y = creatureGridRoot != null ? -(creatureGridRoot.sizeDelta.y + 12f) : -12f;
+            creaturePagerRoot.anchorMin = new Vector2(0f, 1f);
+            creaturePagerRoot.anchorMax = new Vector2(0f, 1f);
+            creaturePagerRoot.pivot = new Vector2(0f, 1f);
+            float y = creatureGridRoot != null ? -(creatureGridRoot.sizeDelta.y + 10f) : -10f;
             creaturePagerRoot.anchoredPosition = new Vector2(0f, y);
             creaturePagerRoot.sizeDelta = new Vector2(350f, 38f);
+        }
+
+        if (creatureRightPanelRoot != null && creatureTabRoot != null && creatureGridRoot != null)
+        {
+            float leftW = creatureGridRoot.sizeDelta.x;
+            float rightW = Mathf.Max(260f, creatureTabRoot.sizeDelta.x - leftW - 16f);
+            float rightH = Mathf.Max(200f, creatureTabRoot.sizeDelta.y);
+
+            creatureRightPanelRoot.anchorMin = new Vector2(0f, 1f);
+            creatureRightPanelRoot.anchorMax = new Vector2(0f, 1f);
+            creatureRightPanelRoot.pivot = new Vector2(0f, 1f);
+            creatureRightPanelRoot.anchoredPosition = new Vector2(leftW + 16f, 0f);
+            creatureRightPanelRoot.sizeDelta = new Vector2(rightW, rightH);
+        }
+
+        if (creaturePartySlots != null && creaturePartySlots.Length > 0)
+        {
+            RectTransform partyRoot = creaturePartySlots[0] != null ? creaturePartySlots[0].transform.parent as RectTransform : null;
+            if (partyRoot != null)
+            {
+                partyRoot.anchoredPosition = new Vector2(10f, -10f);
+                partyRoot.sizeDelta = new Vector2(270f, 168f);
+            }
+        }
+
+        if (creatureDetailsRoot != null && creatureRightPanelRoot != null)
+        {
+            creatureDetailsRoot.anchorMin = new Vector2(0f, 1f);
+            creatureDetailsRoot.anchorMax = new Vector2(1f, 1f);
+            creatureDetailsRoot.pivot = new Vector2(0f, 1f);
+            creatureDetailsRoot.anchoredPosition = new Vector2(10f, -188f);
+            creatureDetailsRoot.sizeDelta = new Vector2(-20f, -(creatureRightPanelRoot.sizeDelta.y - 198f));
+
+            if (creatureDetailSprite != null)
+            {
+                RectTransform rt = creatureDetailSprite.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(0f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(0f, 0f);
+                rt.sizeDelta = new Vector2(124f, 124f);
+            }
+            if (creatureDetailNameText != null)
+            {
+                RectTransform rt = creatureDetailNameText.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(132f, -2f);
+                rt.sizeDelta = new Vector2(-132f, 24f);
+            }
+            if (creatureDetailTypesText != null)
+            {
+                RectTransform rt = creatureDetailTypesText.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(132f, -28f);
+                rt.sizeDelta = new Vector2(-132f, 20f);
+            }
+
+            if (creatureDetailHpBg != null)
+            {
+                RectTransform rt = creatureDetailHpBg.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(132f, -54f);
+                rt.sizeDelta = new Vector2(-132f, 12f);
+                if (creatureDetailHpFill != null)
+                {
+                    RectTransform frt = creatureDetailHpFill.rectTransform;
+                    frt.anchorMin = Vector2.zero;
+                    frt.anchorMax = Vector2.one;
+                    frt.offsetMin = Vector2.zero;
+                    frt.offsetMax = Vector2.zero;
+                }
+            }
+            if (creatureDetailHpText != null)
+            {
+                RectTransform rt = creatureDetailHpText.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(132f, -68f);
+                rt.sizeDelta = new Vector2(-132f, 18f);
+            }
+
+            if (creatureDetailXpBg != null)
+            {
+                RectTransform rt = creatureDetailXpBg.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(132f, -90f);
+                rt.sizeDelta = new Vector2(-132f, 8f);
+                if (creatureDetailXpFill != null)
+                {
+                    RectTransform frt = creatureDetailXpFill.rectTransform;
+                    frt.anchorMin = Vector2.zero;
+                    frt.anchorMax = Vector2.one;
+                    frt.offsetMin = Vector2.zero;
+                    frt.offsetMax = Vector2.zero;
+                }
+            }
+            if (creatureDetailXpText != null)
+            {
+                RectTransform rt = creatureDetailXpText.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(132f, -102f);
+                rt.sizeDelta = new Vector2(-132f, 18f);
+            }
+
+            if (creatureSubTabsRoot != null)
+            {
+                creatureSubTabsRoot.anchorMin = new Vector2(0f, 1f);
+                creatureSubTabsRoot.anchorMax = new Vector2(1f, 1f);
+                creatureSubTabsRoot.pivot = new Vector2(0f, 1f);
+                creatureSubTabsRoot.anchoredPosition = new Vector2(0f, -130f);
+                creatureSubTabsRoot.sizeDelta = new Vector2(0f, 32f);
+            }
+            if (creatureDetailBodyText != null)
+            {
+                RectTransform rt = creatureDetailBodyText.rectTransform;
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 0f);
+                rt.offsetMin = new Vector2(2f, 2f);
+                rt.offsetMax = new Vector2(-2f, -166f);
+            }
         }
 
         if (placeholderRoot != null)
@@ -1094,6 +2095,7 @@ public class InventoryUI : MonoBehaviour
         bool showPlaceholder = !showItems && !showCreatures;
 
         if (bagRoot != null) bagRoot.gameObject.SetActive(showItems);
+        if (itemDetailsRoot != null) itemDetailsRoot.gameObject.SetActive(showItems);
         if (creatureTabRoot != null) creatureTabRoot.gameObject.SetActive(showCreatures);
         if (placeholderRoot != null) placeholderRoot.gameObject.SetActive(showPlaceholder);
 
@@ -1130,6 +2132,7 @@ public class InventoryUI : MonoBehaviour
     {
         EnsureCreatureSources();
         if (creatureSlots == null || creatureSlots.Length == 0) return;
+        EnsureValidCreatureSelection();
 
         int pageCount = storage != null ? Mathf.Max(1, storage.pageCount) : 30;
         creaturePageIndex = Mathf.Clamp(creaturePageIndex, 0, pageCount - 1);
@@ -1140,7 +2143,8 @@ public class InventoryUI : MonoBehaviour
             CreatureStorageSlotUI slot = creatureSlots[i];
             if (slot == null) continue;
             CreatureInstance instance = storage != null ? storage.GetAt(baseIndex + i) : null;
-            ApplyCreatureSlot(slot, instance);
+            bool isSelected = !selectedCreatureFromParty && selectedCreatureStorageIndex == (baseIndex + i);
+            ApplyCreatureSlot(slot, instance, isSelected);
         }
 
         if (creaturePageLabel != null)
@@ -1151,16 +2155,54 @@ public class InventoryUI : MonoBehaviour
 
         if (creaturePrevPageButton != null) creaturePrevPageButton.interactable = creaturePageIndex > 0;
         if (creatureNextPageButton != null) creatureNextPageButton.interactable = creaturePageIndex < pageCount - 1;
+
+        RefreshCreaturePartySlots();
+        RefreshCreatureDetailPanel();
     }
 
-    void ApplyCreatureSlot(CreatureStorageSlotUI slot, CreatureInstance instance)
+    void EnsureValidCreatureSelection()
+    {
+        if (selectedCreatureFromParty)
+        {
+            if (party != null && party.GetCreatureAt(selectedCreaturePartyIndex) != null) return;
+            selectedCreatureFromParty = false;
+            selectedCreaturePartyIndex = -1;
+        }
+
+        if (!selectedCreatureFromParty)
+        {
+            if (storage != null && storage.GetAt(selectedCreatureStorageIndex) != null) return;
+            selectedCreatureStorageIndex = -1;
+        }
+
+        if (party != null && party.PartyCount > 0)
+        {
+            selectedCreatureFromParty = true;
+            selectedCreaturePartyIndex = Mathf.Clamp(party.ActivePartyIndex, 0, Mathf.Max(0, party.PartyCount - 1));
+            return;
+        }
+
+        if (storage != null)
+        {
+            for (int i = 0; i < storage.Capacity; i++)
+            {
+                if (storage.GetAt(i) == null) continue;
+                selectedCreatureFromParty = false;
+                selectedCreatureStorageIndex = i;
+                return;
+            }
+        }
+    }
+
+    void ApplyCreatureSlot(CreatureStorageSlotUI slot, CreatureInstance instance, bool isSelected)
     {
         if (slot == null) return;
         if (slot.background != null)
         {
-            slot.background.sprite = slotSprite;
-            slot.background.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
-            slot.background.color = normalColor;
+            slot.background.sprite = isSelected ? selectedSprite : slotSprite;
+            Sprite bg = isSelected ? selectedSprite : slotSprite;
+            slot.background.type = bg != null && bg.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+            slot.background.color = isSelected ? selectedColor : normalColor;
         }
 
         if (instance == null)
@@ -1193,6 +2235,240 @@ public class InventoryUI : MonoBehaviour
         {
             slot.levelLabel.text = "Lv " + Mathf.Max(1, instance.level);
         }
+    }
+
+    void RefreshCreaturePartySlots()
+    {
+        if (creaturePartySlots == null || party == null) return;
+        for (int i = 0; i < creaturePartySlots.Length; i++)
+        {
+            CreaturePartySlotUI slot = creaturePartySlots[i];
+            if (slot == null) continue;
+            CreatureInstance instance = party.GetCreatureAt(i);
+            bool selected = selectedCreatureFromParty && selectedCreaturePartyIndex == i;
+
+            if (slot.background != null)
+            {
+                Sprite bg = selected ? selectedSprite : slotSprite;
+                slot.background.sprite = bg;
+                slot.background.type = bg != null && bg.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+                slot.background.color = selected ? selectedColor : normalColor;
+            }
+
+            if (slot.icon != null)
+            {
+                CreatureDefinition def = instance != null ? CreatureRegistry.Get(instance.definitionID) : null;
+                slot.icon.sprite = def != null ? def.sprite : null;
+                slot.icon.enabled = slot.icon.sprite != null;
+                slot.icon.color = Color.white;
+            }
+
+            if (slot.levelText != null)
+            {
+                slot.levelText.text = instance != null ? ("Lv " + Mathf.Max(1, instance.level)) : string.Empty;
+            }
+        }
+    }
+
+    public void OnCreatureStorageSlotClicked(int pageLocalIndex)
+    {
+        EnsureCreatureSources();
+        int global = (creaturePageIndex * CreatureSlotsPerPage) + pageLocalIndex;
+        CreatureInstance selected = storage != null ? storage.GetAt(global) : null;
+        if (selected == null) return;
+        selectedCreatureFromParty = false;
+        selectedCreatureStorageIndex = global;
+        selectedCreaturePartyIndex = -1;
+        RefreshCreatureTab();
+    }
+
+    public void OnCreaturePartySlotClicked(int partyIndex)
+    {
+        EnsureCreatureSources();
+        CreatureInstance selected = party != null ? party.GetCreatureAt(partyIndex) : null;
+        if (selected == null) return;
+        selectedCreatureFromParty = true;
+        selectedCreaturePartyIndex = partyIndex;
+        selectedCreatureStorageIndex = -1;
+        RefreshCreatureTab();
+    }
+
+    void SetCreatureDetailSubTab(CreatureDetailSubTab tab)
+    {
+        activeCreatureDetailSubTab = tab;
+        RefreshCreatureDetailPanel();
+    }
+
+    CreatureInstance ResolveSelectedCreatureForDetails(out CreatureDefinition def)
+    {
+        def = null;
+        EnsureCreatureSources();
+
+        CreatureInstance instance = null;
+        if (selectedCreatureFromParty)
+        {
+            instance = party != null ? party.GetCreatureAt(selectedCreaturePartyIndex) : null;
+        }
+        else
+        {
+            instance = storage != null ? storage.GetAt(selectedCreatureStorageIndex) : null;
+        }
+
+        if (instance == null)
+        {
+            if (party != null && party.PartyCount > 0)
+            {
+                selectedCreatureFromParty = true;
+                selectedCreaturePartyIndex = 0;
+                selectedCreatureStorageIndex = -1;
+                instance = party.GetCreatureAt(0);
+            }
+            else if (storage != null)
+            {
+                for (int i = 0; i < storage.Capacity; i++)
+                {
+                    CreatureInstance c = storage.GetAt(i);
+                    if (c == null) continue;
+                    selectedCreatureFromParty = false;
+                    selectedCreatureStorageIndex = i;
+                    selectedCreaturePartyIndex = -1;
+                    instance = c;
+                    break;
+                }
+            }
+        }
+
+        if (instance != null) def = CreatureRegistry.Get(instance.definitionID);
+        return instance;
+    }
+
+    void RefreshCreatureDetailPanel()
+    {
+        if (creatureDetailsRoot == null) return;
+        CreatureDefinition def;
+        CreatureInstance instance = ResolveSelectedCreatureForDetails(out def);
+
+        Color selectedTab = new Color(0.58f, 0.52f, 0.24f, 0.95f);
+        Color normalTab = new Color(0.20f, 0.20f, 0.24f, 0.95f);
+        if (creatureSummaryTabButton != null) creatureSummaryTabButton.GetComponent<Image>().color = activeCreatureDetailSubTab == CreatureDetailSubTab.Summary ? selectedTab : normalTab;
+        if (creatureAttacksTabButton != null) creatureAttacksTabButton.GetComponent<Image>().color = activeCreatureDetailSubTab == CreatureDetailSubTab.Attacks ? selectedTab : normalTab;
+        if (creatureSoulTraitsTabButton != null) creatureSoulTraitsTabButton.GetComponent<Image>().color = activeCreatureDetailSubTab == CreatureDetailSubTab.SoulTraits ? selectedTab : normalTab;
+
+        if (instance == null || def == null)
+        {
+            if (creatureDetailSprite != null) { creatureDetailSprite.sprite = null; creatureDetailSprite.enabled = false; }
+            if (creatureDetailNameText != null) creatureDetailNameText.text = "No creature selected";
+            if (creatureDetailTypesText != null) creatureDetailTypesText.text = string.Empty;
+            if (creatureDetailHpFill != null) creatureDetailHpFill.fillAmount = 0f;
+            if (creatureDetailXpFill != null) creatureDetailXpFill.fillAmount = 0f;
+            if (creatureDetailHpText != null) creatureDetailHpText.text = string.Empty;
+            if (creatureDetailXpText != null) creatureDetailXpText.text = string.Empty;
+            if (creatureDetailBodyText != null) creatureDetailBodyText.text = string.Empty;
+            return;
+        }
+
+        if (creatureDetailSprite != null)
+        {
+            creatureDetailSprite.sprite = def.sprite;
+            creatureDetailSprite.enabled = creatureDetailSprite.sprite != null;
+        }
+
+        int level = Mathf.Max(1, instance.level);
+        int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, instance.soulTraits, level));
+        int currHp = Mathf.Clamp(instance.currentHP, 0, maxHp);
+        float hp01 = maxHp > 0 ? (float)currHp / maxHp : 0f;
+        float xp01 = CreatureExperienceSystem.GetLevelProgress01(instance, def);
+        int xpFloor = CreatureExperienceSystem.GetTotalXpForLevel(level, def);
+        int xpCeil = CreatureExperienceSystem.GetTotalXpForLevel(Mathf.Min(CreatureExperienceSystem.MaxLevel, level + 1), def);
+        int xpSpan = Mathf.Max(1, xpCeil - xpFloor);
+        int xpSegment = Mathf.Clamp(instance.totalExperience - xpFloor, 0, xpSpan);
+
+        if (creatureDetailNameText != null) creatureDetailNameText.text = instance.DisplayName + "  Lv " + level;
+        if (creatureDetailTypesText != null) creatureDetailTypesText.text = string.Join(" / ", def.GetAllTypes());
+        if (creatureDetailHpFill != null)
+        {
+            creatureDetailHpFill.fillAmount = hp01;
+            creatureDetailHpFill.color = ResolveHpColor(hp01);
+        }
+        if (creatureDetailXpFill != null)
+        {
+            creatureDetailXpFill.fillAmount = xp01;
+            creatureDetailXpFill.color = new Color(0.20f, 0.63f, 0.96f, 1f);
+        }
+        if (creatureDetailHpText != null) creatureDetailHpText.text = "HP  " + currHp + " / " + maxHp;
+        if (creatureDetailXpText != null)
+        {
+            if (level >= CreatureExperienceSystem.MaxLevel) creatureDetailXpText.text = "XP  MAX";
+            else creatureDetailXpText.text = "XP  " + xpSegment + " / " + xpSpan;
+        }
+
+        if (creatureDetailBodyText != null)
+        {
+            creatureDetailBodyText.text = BuildCreatureDetailBody(def, instance);
+        }
+    }
+
+    Color ResolveHpColor(float ratio)
+    {
+        if (ratio > 0.75f) return new Color(0.20f, 0.82f, 0.24f, 1f);
+        if (ratio > 0.50f) return new Color(0.97f, 0.88f, 0.20f, 1f);
+        if (ratio > 0.25f) return new Color(1.00f, 0.62f, 0.16f, 1f);
+        return new Color(0.90f, 0.18f, 0.18f, 1f);
+    }
+
+    string BuildCreatureDetailBody(CreatureDefinition def, CreatureInstance instance)
+    {
+        if (def == null || instance == null) return string.Empty;
+        StringBuilder sb = new StringBuilder(512);
+        int level = Mathf.Max(1, instance.level);
+
+        if (activeCreatureDetailSubTab == CreatureDetailSubTab.Summary)
+        {
+            int atk = CreatureInstanceFactory.ComputeAttack(def, instance.soulTraits, level);
+            int deff = CreatureInstanceFactory.ComputeDefense(def, instance.soulTraits, level);
+            int spd = CreatureInstanceFactory.ComputeSpeed(def, instance.soulTraits, level);
+            sb.AppendLine(def.description);
+            sb.AppendLine();
+            sb.AppendLine("Rarity: " + def.rarityTier);
+            sb.AppendLine("Stage: " + def.evolutionStage);
+            sb.AppendLine("Atk: " + atk + "  Def: " + deff + "  Spd: " + spd);
+            sb.AppendLine("Battles: " + Mathf.Max(0, instance.totalBattles));
+        }
+        else if (activeCreatureDetailSubTab == CreatureDetailSubTab.Attacks)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                MoveDefinition move = def.GetMoveForSlot(i);
+                if (move == null)
+                {
+                    sb.AppendLine((i + 1) + ". ---");
+                    continue;
+                }
+
+                int ppCurrent = instance.currentPP != null && i < instance.currentPP.Length ? Mathf.Max(0, instance.currentPP[i]) : move.maxPP;
+                sb.Append((i + 1) + ". ");
+                sb.Append(move.displayName);
+                sb.Append("  ");
+                sb.Append(move.baseDamage <= 0 ? "Status" : ("Pow " + move.baseDamage));
+                sb.Append("  ");
+                sb.Append("PP " + ppCurrent + "/" + Mathf.Max(0, move.maxPP));
+                sb.Append("  ");
+                sb.Append(move.moveType);
+                sb.AppendLine();
+            }
+        }
+        else
+        {
+            SoulTraitValues st = instance.soulTraits;
+            sb.AppendLine("Vitality Spark: " + st.vitalitySpark);
+            sb.AppendLine("Strike Essence: " + st.strikeEssence);
+            sb.AppendLine("Ward Essence: " + st.wardEssence);
+            sb.AppendLine("Gale Essence: " + st.galeEssence);
+            sb.AppendLine("Focus Essence: " + st.focusEssence);
+            sb.AppendLine("Soul Depth: " + st.soulDepth);
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     void OnPrevCreaturePage()
@@ -1296,13 +2572,8 @@ public class InventorySlotUI : MonoBehaviour, IPointerDownHandler, IBeginDragHan
 
     public void OnPointerDown(PointerEventData eventData)
     {
-        if (ui != null)
-        {
-            if (isHotbar)
-            {
-                ui.SelectHotbar(index);
-            }
-        }
+        if (ui == null) return;
+        ui.OnInventorySlotClicked(this);
     }
 
     public void OnBeginDrag(PointerEventData eventData)
@@ -1338,10 +2609,127 @@ public class InventorySlotUI : MonoBehaviour, IPointerDownHandler, IBeginDragHan
     }
 }
 
-public class CreatureStorageSlotUI : MonoBehaviour
+public class CreatureStorageSlotUI : MonoBehaviour, IPointerDownHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler
 {
+    public InventoryUI ui;
+    public int pageLocalIndex;
     public Image background;
     public Image icon;
     public Text nameLabel;
     public Text levelLabel;
+
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        ui.OnCreatureStorageSlotClicked(pageLocalIndex);
+    }
+
+    public void OnBeginDrag(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        ui.BeginCreatureDragFromStorage(this);
+        ui.UpdateDragVisual(eventData);
+    }
+
+    public void OnDrag(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        if (!ui.HasActiveCreatureDrag()) return;
+        ui.UpdateDragVisual(eventData);
+    }
+
+    public void OnDrop(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        if (!ui.HasActiveCreatureDrag()) return;
+        ui.DropCreatureOnStorageSlot(pageLocalIndex);
+    }
+
+    public void OnEndDrag(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        if (!ui.HasActiveCreatureDrag()) return;
+
+        if (eventData != null && eventData.pointerCurrentRaycast.gameObject != null)
+        {
+            GameObject go = eventData.pointerCurrentRaycast.gameObject;
+            CreatureStorageSlotUI storageTarget = go.GetComponentInParent<CreatureStorageSlotUI>();
+            if (storageTarget != null)
+            {
+                ui.DropCreatureOnStorageSlot(storageTarget.pageLocalIndex);
+                return;
+            }
+
+            CreaturePartySlotUI partyTarget = go.GetComponentInParent<CreaturePartySlotUI>();
+            if (partyTarget != null)
+            {
+                ui.DropCreatureOnPartySlot(partyTarget.partyIndex);
+                return;
+            }
+        }
+
+        ui.EndCreatureDrag();
+    }
+}
+
+public class CreaturePartySlotUI : MonoBehaviour, IPointerDownHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler
+{
+    public InventoryUI ui;
+    public int partyIndex;
+    public Image background;
+    public Image icon;
+    public Text levelText;
+
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        ui.OnCreaturePartySlotClicked(partyIndex);
+    }
+
+    public void OnBeginDrag(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        ui.BeginCreatureDragFromParty(this);
+        ui.UpdateDragVisual(eventData);
+    }
+
+    public void OnDrag(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        if (!ui.HasActiveCreatureDrag()) return;
+        ui.UpdateDragVisual(eventData);
+    }
+
+    public void OnDrop(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        if (!ui.HasActiveCreatureDrag()) return;
+        ui.DropCreatureOnPartySlot(partyIndex);
+    }
+
+    public void OnEndDrag(PointerEventData eventData)
+    {
+        if (ui == null) return;
+        if (!ui.HasActiveCreatureDrag()) return;
+
+        if (eventData != null && eventData.pointerCurrentRaycast.gameObject != null)
+        {
+            GameObject go = eventData.pointerCurrentRaycast.gameObject;
+            CreaturePartySlotUI partyTarget = go.GetComponentInParent<CreaturePartySlotUI>();
+            if (partyTarget != null)
+            {
+                ui.DropCreatureOnPartySlot(partyTarget.partyIndex);
+                return;
+            }
+
+            CreatureStorageSlotUI storageTarget = go.GetComponentInParent<CreatureStorageSlotUI>();
+            if (storageTarget != null)
+            {
+                ui.DropCreatureOnStorageSlot(storageTarget.pageLocalIndex);
+                return;
+            }
+        }
+
+        ui.EndCreatureDrag();
+    }
 }
