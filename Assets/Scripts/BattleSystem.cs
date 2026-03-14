@@ -161,6 +161,16 @@ public class BattleSystem : MonoBehaviour
     private static readonly Color HpYellow = new Color(0.97f, 0.88f, 0.20f, 1f);
     private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
     private static readonly Color HpRed = new Color(0.90f, 0.18f, 0.18f, 1f);
+    private static readonly Color TypeNormal = new Color32(0x88, 0x88, 0x88, 0xFF);
+    private static readonly Color TypeFire = new Color32(0xC8, 0x4B, 0x31, 0xFF);
+    private static readonly Color TypeWater = new Color32(0x1B, 0x6C, 0xA8, 0xFF);
+    private static readonly Color TypeLightning = new Color32(0xD4, 0xA0, 0x17, 0xFF);
+    private static readonly Color TypeEarth = new Color32(0x7A, 0x5C, 0x3A, 0xFF);
+    private static readonly Color TypeNature = new Color32(0x2E, 0x7D, 0x32, 0xFF);
+    private static readonly Color TypeIce = new Color32(0x5C, 0x9E, 0xBF, 0xFF);
+    private static readonly Color TypeDragon = new Color32(0x6A, 0x0D, 0xAD, 0xFF);
+    private static readonly Color TypeLight = new Color32(0xFF, 0xF8, 0xE7, 0xFF);
+    private static readonly Color TypeDark = new Color32(0x3A, 0x3A, 0x5C, 0xFF);
 
     private sealed class SwapCardView
     {
@@ -4610,12 +4620,25 @@ public class BattleSystem : MonoBehaviour
     void UpdateButtonVisualState(Button button)
     {
         if (button == null) return;
+        int moveButtonIndex = ResolveMoveButtonIndex(button);
+        Color buttonFaceColor = Color.white;
         Image image = button.GetComponent<Image>();
         if (image != null)
         {
-            image.color = button.interactable
-                ? Color.white
-                : new Color(0.55f, 0.55f, 0.55f, 1f);
+            if (!button.interactable)
+            {
+                buttonFaceColor = new Color(0.55f, 0.55f, 0.55f, 1f);
+            }
+            else if (moveButtonIndex >= 0)
+            {
+                buttonFaceColor = ResolveMoveButtonFaceColor(moveButtonIndex);
+            }
+            else
+            {
+                buttonFaceColor = Color.white;
+            }
+
+            image.color = buttonFaceColor;
         }
 
         Text[] labels = button.GetComponentsInChildren<Text>(true);
@@ -4631,11 +4654,65 @@ public class BattleSystem : MonoBehaviour
             }
             else
             {
-                label.color = button.interactable
-                    ? Color.white
-                    : new Color(0.82f, 0.82f, 0.82f, 1f);
+                if (button.interactable && moveButtonIndex >= 0)
+                {
+                    label.color = ResolveReadableButtonTextColor(buttonFaceColor);
+                }
+                else
+                {
+                    label.color = button.interactable
+                        ? Color.white
+                        : new Color(0.82f, 0.82f, 0.82f, 1f);
+                }
             }
         }
+    }
+
+    int ResolveMoveButtonIndex(Button button)
+    {
+        if (button == null || moveButtons == null) return -1;
+        for (int i = 0; i < moveButtons.Length; i++)
+        {
+            if (moveButtons[i] == button) return i;
+        }
+        return -1;
+    }
+
+    Color ResolveMoveButtonFaceColor(int moveButtonIndex)
+    {
+        if (playerCreature == null || playerCreature.attacks == null) return TypeNormal;
+        if (moveButtonIndex < 0 || moveButtonIndex >= playerCreature.attacks.Count) return TypeNormal;
+        AttackData atk = playerCreature.attacks[moveButtonIndex];
+        if (atk == null) return TypeNormal;
+        return ResolveTypeButtonColor(atk.type);
+    }
+
+    Color ResolveTypeButtonColor(CreatureType type)
+    {
+        switch (type)
+        {
+            case CreatureType.Fire: return TypeFire;
+            case CreatureType.Water: return TypeWater;
+            case CreatureType.Lightning: return TypeLightning;
+            case CreatureType.Earth: return TypeEarth;
+            case CreatureType.Nature: return TypeNature;
+            case CreatureType.Ice: return TypeIce;
+            case CreatureType.Dragon: return TypeDragon;
+            case CreatureType.Light: return TypeLight;
+            case CreatureType.Dark: return TypeDark;
+            case CreatureType.Normal:
+            case CreatureType.None:
+            default:
+                return TypeNormal;
+        }
+    }
+
+    Color ResolveReadableButtonTextColor(Color background)
+    {
+        float luminance = (0.299f * background.r) + (0.587f * background.g) + (0.114f * background.b);
+        return luminance >= 0.62f
+            ? new Color(0.08f, 0.08f, 0.10f, 1f)
+            : Color.white;
     }
 
     void ApplyCreatureIdleAnimation()
