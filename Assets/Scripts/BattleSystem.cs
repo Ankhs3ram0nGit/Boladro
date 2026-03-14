@@ -58,6 +58,11 @@ public class BattleSystem : MonoBehaviour
     public bool showEngageDebug = false;
     public Vector2 engageDebugPanelPosition = new Vector2(16f, 160f);
     public Vector2 engageDebugPanelSize = new Vector2(560f, 190f);
+    [Header("Swap Menu")]
+    [Range(0f, 1f)] public float swapOverlayOpacity = 0.72f;
+    public Sprite swapCardBackgroundSprite;
+    public Sprite swapCardGlassSprite;
+    public Sprite swapExitIconSprite;
 
     private PlayerMover playerMover;
     private PlayerHealth playerHealth;
@@ -77,6 +82,15 @@ public class BattleSystem : MonoBehaviour
     private Image bottomFrameImage;
     private Font cachedDefaultFont;
     private readonly Dictionary<string, Sprite> creatureSpriteCache = new Dictionary<string, Sprite>();
+    private PlayerCreatureParty playerParty;
+    private GameObject swapMenuRoot;
+    private RectTransform swapMenuCardsRoot;
+    private Button swapMenuExitButton;
+    private bool swapMenuOpen;
+    private bool swapMenuExitAnimating;
+    private readonly List<SwapCardView> swapCardViews = new List<SwapCardView>();
+    private readonly Dictionary<string, Sprite> swapHeadSpriteCache = new Dictionary<string, Sprite>();
+    private readonly List<Sprite> generatedSwapHeadSprites = new List<Sprite>();
 
     private bool inBattle;
     private bool waitingForPlayerMove;
@@ -102,6 +116,23 @@ public class BattleSystem : MonoBehaviour
     private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
     private static readonly Color HpRed = new Color(0.90f, 0.18f, 0.18f, 1f);
 
+    private sealed class SwapCardView
+    {
+        public int slotIndex;
+        public Button button;
+        public RectTransform root;
+        public LayoutElement layout;
+        public Image background;
+        public RectTransform iconRect;
+        public Image icon;
+        public Image glass;
+        public Text nameText;
+        public Text levelText;
+        public Text hpText;
+        public Image hpFill;
+        public Image xpFill;
+    }
+
     void OnEnable()
     {
         // Recover from stale play-mode state when domain reload is disabled.
@@ -114,6 +145,21 @@ public class BattleSystem : MonoBehaviour
     void OnDisable()
     {
         IsEngagedBattleActive = false;
+        swapMenuOpen = false;
+        if (swapMenuRoot != null) swapMenuRoot.SetActive(false);
+    }
+
+    void OnDestroy()
+    {
+        for (int i = 0; i < generatedSwapHeadSprites.Count; i++)
+        {
+            if (generatedSwapHeadSprites[i] != null)
+            {
+                Destroy(generatedSwapHeadSprites[i]);
+            }
+        }
+        generatedSwapHeadSprites.Clear();
+        swapHeadSpriteCache.Clear();
     }
 
     void Start()
@@ -130,6 +176,7 @@ public class BattleSystem : MonoBehaviour
 
         playerMover = GetComponent<PlayerMover>();
         playerHealth = GetComponent<PlayerHealth>();
+        EnsurePlayerPartySource();
 
         AutoFindUI();
 
@@ -141,6 +188,7 @@ public class BattleSystem : MonoBehaviour
         ApplyBarSprites();
         EnsureButtonLabels();
         ApplyButtonSkins();
+        EnsureSwapMenuSprites();
     }
 
     void AutoFindUI()
@@ -239,6 +287,47 @@ public class BattleSystem : MonoBehaviour
         return t != null ? t.GetComponent<RectTransform>() : null;
     }
 
+    void EnsurePlayerPartySource()
+    {
+        if (playerParty != null) return;
+        if (playerMover == null)
+        {
+            playerMover = GetComponent<PlayerMover>();
+        }
+        if (playerMover == null) return;
+
+        playerParty = playerMover.GetComponent<PlayerCreatureParty>();
+        if (playerParty == null)
+        {
+            playerParty = playerMover.gameObject.AddComponent<PlayerCreatureParty>();
+        }
+        if (playerParty != null && (playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0))
+        {
+            playerParty.InitializeParty();
+        }
+    }
+
+    void EnsureSwapMenuSprites()
+    {
+#if UNITY_EDITOR
+        if (swapCardBackgroundSprite == null)
+        {
+            swapCardBackgroundSprite = AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_FrameMarker01a.png");
+        }
+        if (swapCardGlassSprite == null)
+        {
+            swapCardGlassSprite = AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_FrameSlot01c.png");
+        }
+        if (swapExitIconSprite == null)
+        {
+            swapExitIconSprite = AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_IconCross01a.png");
+        }
+#endif
+    }
+
     void Update()
     {
         RecoverFromStaleBattleState();
@@ -279,7 +368,7 @@ public class BattleSystem : MonoBehaviour
         if (swapButton != null)
         {
             swapButton.onClick.RemoveAllListeners();
-            swapButton.onClick.AddListener(() => SetMessage("Swap not implemented yet."));
+            swapButton.onClick.AddListener(OpenSwapMenu);
         }
         if (captureButton != null)
         {
@@ -609,6 +698,7 @@ public class BattleSystem : MonoBehaviour
         {
             movePanel.SetActive(false);
         }
+        CloseSwapMenu(false);
 
         if (playerMover != null && (playerHealth == null || playerHealth.currentHealth > 0))
         {
@@ -794,6 +884,7 @@ public class BattleSystem : MonoBehaviour
 
         if (battleRoot != null) battleRoot.SetActive(true);
         if (movePanel != null) movePanel.SetActive(false);
+        CloseSwapMenu(false);
         SetActionMenuVisible(true);
         SetBackButtonVisible(false);
         if (hudRoot != null && battleRoot != null && !battleRoot.transform.IsChildOf(hudRoot.transform))
@@ -939,6 +1030,7 @@ public class BattleSystem : MonoBehaviour
 
         if (battleRoot != null) battleRoot.SetActive(false);
         if (movePanel != null) movePanel.SetActive(false);
+        CloseSwapMenu(false);
         SetActionMenuVisible(true);
         SetBackButtonVisible(false);
         if (hudRoot != null && hudWasHiddenForBattle) hudRoot.SetActive(true);
@@ -1029,6 +1121,634 @@ public class BattleSystem : MonoBehaviour
                 UpdateButtonVisualState(moveButtons[i]);
             }
         }
+    }
+
+    void OpenSwapMenu()
+    {
+        if (swapMenuOpen) return;
+        if (!inBattle || !waitingForPlayerMove || turnResolutionInProgress) return;
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0)
+        {
+            SetMessage("No party creatures available.");
+            return;
+        }
+
+        if (movePanel != null) movePanel.SetActive(false);
+        SetBackButtonVisible(false);
+        SetActionMenuVisible(false);
+
+        EnsureSwapMenu();
+        RefreshSwapMenuCards();
+
+        swapMenuOpen = true;
+        swapMenuExitAnimating = false;
+        if (swapMenuRoot != null)
+        {
+            swapMenuRoot.SetActive(true);
+            swapMenuRoot.transform.SetAsLastSibling();
+        }
+
+        SetMessage("Choose a creature to swap.");
+        RefreshTurnInputState();
+    }
+
+    void EnsureSwapMenu()
+    {
+        if (battleRoot == null) return;
+        EnsureSwapMenuSprites();
+
+        Transform existing = battleRoot.transform.Find("SwapMenuOverlay");
+        if (existing == null)
+        {
+            GameObject go = new GameObject("SwapMenuOverlay", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(battleRoot.transform, false);
+            existing = go.transform;
+        }
+
+        swapMenuRoot = existing.gameObject;
+        RectTransform rootRt = swapMenuRoot.GetComponent<RectTransform>();
+        rootRt.anchorMin = Vector2.zero;
+        rootRt.anchorMax = Vector2.one;
+        rootRt.offsetMin = Vector2.zero;
+        rootRt.offsetMax = Vector2.zero;
+
+        Image overlay = swapMenuRoot.GetComponent<Image>();
+        overlay.color = new Color(0f, 0f, 0f, Mathf.Clamp01(swapOverlayOpacity));
+        overlay.raycastTarget = true;
+        overlay.sprite = null;
+        overlay.type = Image.Type.Simple;
+
+        Transform cardsTf = swapMenuRoot.transform.Find("SwapCardsRoot");
+        if (cardsTf == null)
+        {
+            GameObject go = new GameObject("SwapCardsRoot", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(ContentSizeFitter));
+            go.transform.SetParent(swapMenuRoot.transform, false);
+            cardsTf = go.transform;
+        }
+        swapMenuCardsRoot = cardsTf as RectTransform;
+        if (swapMenuCardsRoot != null)
+        {
+            swapMenuCardsRoot.anchorMin = new Vector2(0.5f, 0.5f);
+            swapMenuCardsRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            swapMenuCardsRoot.pivot = new Vector2(0.5f, 0.5f);
+            swapMenuCardsRoot.anchoredPosition = new Vector2(0f, -8f);
+            swapMenuCardsRoot.sizeDelta = new Vector2(980f, 560f);
+        }
+
+        HorizontalLayoutGroup hLayout = cardsTf.GetComponent<HorizontalLayoutGroup>();
+        if (hLayout == null) hLayout = cardsTf.gameObject.AddComponent<HorizontalLayoutGroup>();
+        hLayout.spacing = 48f;
+        hLayout.childAlignment = TextAnchor.MiddleCenter;
+        hLayout.childControlWidth = false;
+        hLayout.childControlHeight = false;
+        hLayout.childForceExpandWidth = false;
+        hLayout.childForceExpandHeight = false;
+
+        ContentSizeFitter hFitter = cardsTf.GetComponent<ContentSizeFitter>();
+        if (hFitter == null) hFitter = cardsTf.gameObject.AddComponent<ContentSizeFitter>();
+        hFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        hFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        RectTransform leftColumn = EnsureSwapColumn(cardsTf, "LeftColumn");
+        RectTransform rightColumn = EnsureSwapColumn(cardsTf, "RightColumn");
+        ConfigureSwapColumn(leftColumn);
+        ConfigureSwapColumn(rightColumn);
+
+        bool rebuildCards = swapCardViews.Count != 6;
+        if (!rebuildCards)
+        {
+            for (int i = 0; i < swapCardViews.Count; i++)
+            {
+                if (swapCardViews[i] == null || swapCardViews[i].root == null)
+                {
+                    rebuildCards = true;
+                    break;
+                }
+            }
+        }
+
+        if (rebuildCards)
+        {
+            for (int i = 0; i < swapCardViews.Count; i++)
+            {
+                if (swapCardViews[i] != null && swapCardViews[i].root != null)
+                {
+                    if (Application.isPlaying) Destroy(swapCardViews[i].root.gameObject);
+                    else DestroyImmediate(swapCardViews[i].root.gameObject);
+                }
+            }
+            swapCardViews.Clear();
+
+            for (int i = 0; i < 6; i++)
+            {
+                RectTransform parent = i < 3 ? leftColumn : rightColumn;
+                swapCardViews.Add(BuildSwapCard(i, parent));
+            }
+        }
+
+        Transform exitTf = swapMenuRoot.transform.Find("SwapExitButton");
+        if (exitTf == null)
+        {
+            GameObject go = new GameObject("SwapExitButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+            go.transform.SetParent(swapMenuRoot.transform, false);
+            exitTf = go.transform;
+        }
+
+        RectTransform exitRt = exitTf as RectTransform;
+        if (exitRt != null)
+        {
+            exitRt.anchorMin = new Vector2(1f, 1f);
+            exitRt.anchorMax = new Vector2(1f, 1f);
+            exitRt.pivot = new Vector2(1f, 1f);
+            exitRt.anchoredPosition = new Vector2(-22f, -18f);
+            exitRt.sizeDelta = new Vector2(76f, 76f);
+            exitRt.localScale = Vector3.one;
+        }
+
+        Image exitImg = exitTf.GetComponent<Image>();
+        exitImg.sprite = swapExitIconSprite;
+        exitImg.color = Color.white;
+        exitImg.type = swapExitIconSprite != null && swapExitIconSprite.border.sqrMagnitude > 0f
+            ? Image.Type.Sliced
+            : Image.Type.Simple;
+        exitImg.preserveAspect = true;
+
+        swapMenuExitButton = exitTf.GetComponent<Button>();
+        if (swapMenuExitButton != null)
+        {
+            swapMenuExitButton.onClick.RemoveAllListeners();
+            swapMenuExitButton.onClick.AddListener(OnSwapExitPressed);
+            ColorBlock cb = swapMenuExitButton.colors;
+            cb.normalColor = Color.white;
+            cb.highlightedColor = new Color(1f, 1f, 1f, 0.92f);
+            cb.pressedColor = new Color(0.85f, 0.85f, 0.85f, 1f);
+            cb.disabledColor = new Color(1f, 1f, 1f, 0.45f);
+            swapMenuExitButton.colors = cb;
+            swapMenuExitButton.transition = Selectable.Transition.ColorTint;
+        }
+
+        swapMenuRoot.transform.SetAsLastSibling();
+        if (!swapMenuOpen && swapMenuRoot.activeSelf)
+        {
+            swapMenuRoot.SetActive(false);
+        }
+    }
+
+    RectTransform EnsureSwapColumn(Transform cardsRoot, string name)
+    {
+        Transform t = cardsRoot.Find(name);
+        if (t == null)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter), typeof(LayoutElement));
+            go.transform.SetParent(cardsRoot, false);
+            t = go.transform;
+        }
+        return t as RectTransform;
+    }
+
+    void ConfigureSwapColumn(RectTransform column)
+    {
+        if (column == null) return;
+        column.anchorMin = new Vector2(0.5f, 0.5f);
+        column.anchorMax = new Vector2(0.5f, 0.5f);
+        column.pivot = new Vector2(0.5f, 0.5f);
+        column.anchoredPosition = Vector2.zero;
+        column.sizeDelta = new Vector2(460f, 520f);
+
+        VerticalLayoutGroup vLayout = column.GetComponent<VerticalLayoutGroup>();
+        if (vLayout == null) vLayout = column.gameObject.AddComponent<VerticalLayoutGroup>();
+        vLayout.spacing = 12f;
+        vLayout.childAlignment = TextAnchor.MiddleCenter;
+        vLayout.childControlWidth = false;
+        vLayout.childControlHeight = false;
+        vLayout.childForceExpandWidth = false;
+        vLayout.childForceExpandHeight = false;
+
+        ContentSizeFitter fitter = column.GetComponent<ContentSizeFitter>();
+        if (fitter == null) fitter = column.gameObject.AddComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        LayoutElement layout = column.GetComponent<LayoutElement>();
+        if (layout == null) layout = column.gameObject.AddComponent<LayoutElement>();
+        layout.preferredWidth = 460f;
+        layout.preferredHeight = 520f;
+    }
+
+    SwapCardView BuildSwapCard(int index, RectTransform parent)
+    {
+        GameObject slot = new GameObject(
+            "SwapCard" + (index + 1),
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(Button),
+            typeof(LayoutElement));
+        slot.transform.SetParent(parent, false);
+
+        RectTransform slotRt = slot.GetComponent<RectTransform>();
+        slotRt.sizeDelta = new Vector2(430f, 102f);
+        LayoutElement layout = slot.GetComponent<LayoutElement>();
+        layout.preferredWidth = 430f;
+        layout.preferredHeight = 102f;
+        layout.minWidth = 430f;
+        layout.minHeight = 102f;
+
+        Image bg = slot.GetComponent<Image>();
+        bg.sprite = swapCardBackgroundSprite;
+        bg.color = Color.white;
+        bg.type = swapCardBackgroundSprite != null && swapCardBackgroundSprite.border.sqrMagnitude > 0f
+            ? Image.Type.Sliced
+            : Image.Type.Simple;
+        bg.raycastTarget = true;
+
+        Button btn = slot.GetComponent<Button>();
+        btn.transition = Selectable.Transition.ColorTint;
+        ColorBlock cb = btn.colors;
+        cb.normalColor = Color.white;
+        cb.highlightedColor = new Color(1f, 1f, 1f, 0.94f);
+        cb.pressedColor = new Color(0.87f, 0.87f, 0.87f, 1f);
+        cb.disabledColor = new Color(0.78f, 0.78f, 0.78f, 0.95f);
+        btn.colors = cb;
+        int captured = index;
+        btn.onClick.RemoveAllListeners();
+        btn.onClick.AddListener(() => OnSwapCardSelected(captured));
+
+        GameObject iconGo = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        iconGo.transform.SetParent(slot.transform, false);
+        RectTransform iconRt = iconGo.GetComponent<RectTransform>();
+        iconRt.anchorMin = new Vector2(0f, 0.5f);
+        iconRt.anchorMax = new Vector2(0f, 0.5f);
+        iconRt.pivot = new Vector2(0.5f, 0.5f);
+        iconRt.sizeDelta = new Vector2(66f, 66f);
+        iconRt.anchoredPosition = new Vector2(46f, 0f);
+        Image icon = iconGo.GetComponent<Image>();
+        icon.raycastTarget = false;
+        icon.preserveAspect = true;
+        icon.color = Color.white;
+
+        RectTransform infoRoot = new GameObject("Info", typeof(RectTransform)).GetComponent<RectTransform>();
+        infoRoot.transform.SetParent(slot.transform, false);
+        infoRoot.anchorMin = new Vector2(0f, 0f);
+        infoRoot.anchorMax = new Vector2(1f, 1f);
+        infoRoot.pivot = new Vector2(0.5f, 0.5f);
+        infoRoot.offsetMin = new Vector2(86f, 9f);
+        infoRoot.offsetMax = new Vector2(-10f, -9f);
+
+        Text name = CreateSwapCardText("Name", infoRoot, 27, TextAnchor.UpperLeft);
+        Text level = CreateSwapCardText("Level", infoRoot, 24, TextAnchor.UpperRight);
+        Text hp = CreateSwapCardText("HP", infoRoot, 19, TextAnchor.MiddleRight);
+
+        LayoutSwapText(name.rectTransform, new Vector2(0f, 0.62f), new Vector2(0.75f, 1f));
+        LayoutSwapText(level.rectTransform, new Vector2(0.75f, 0.62f), new Vector2(1f, 1f));
+        LayoutSwapText(hp.rectTransform, new Vector2(0.58f, 0.30f), new Vector2(1f, 0.47f));
+
+        Image hpBack = CreateSwapBar("HPBarBG", infoRoot, new Color(0f, 0f, 0f, 0.50f), new Vector2(0f, 0.37f), new Vector2(1f, 0.56f));
+        Image hpFill = CreateSwapFill(hpBack.rectTransform, new Color(0.16f, 0.92f, 0.22f, 1f));
+
+        Image xpBack = CreateSwapBar("XPBarBG", infoRoot, new Color(0f, 0f, 0f, 0.50f), new Vector2(0f, 0.11f), new Vector2(1f, 0.27f));
+        Image xpFill = CreateSwapFill(xpBack.rectTransform, new Color(0.28f, 0.75f, 1f, 1f));
+
+        GameObject glassGo = new GameObject("Glass", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        glassGo.transform.SetParent(slot.transform, false);
+        RectTransform glassRt = glassGo.GetComponent<RectTransform>();
+        glassRt.anchorMin = Vector2.zero;
+        glassRt.anchorMax = Vector2.one;
+        glassRt.offsetMin = Vector2.zero;
+        glassRt.offsetMax = Vector2.zero;
+        Image glass = glassGo.GetComponent<Image>();
+        glass.sprite = swapCardGlassSprite;
+        glass.type = swapCardGlassSprite != null && swapCardGlassSprite.border.sqrMagnitude > 0f
+            ? Image.Type.Sliced
+            : Image.Type.Simple;
+        glass.color = Color.white;
+        glass.raycastTarget = false;
+        glass.enabled = false;
+
+        return new SwapCardView
+        {
+            slotIndex = index,
+            button = btn,
+            root = slotRt,
+            layout = layout,
+            background = bg,
+            iconRect = iconRt,
+            icon = icon,
+            glass = glass,
+            nameText = name,
+            levelText = level,
+            hpText = hp,
+            hpFill = hpFill,
+            xpFill = xpFill
+        };
+    }
+
+    Text CreateSwapCardText(string name, RectTransform parent, int fontSize, TextAnchor alignment)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+        go.transform.SetParent(parent, false);
+
+        Text txt = go.GetComponent<Text>();
+        txt.font = GetDefaultUIFont();
+        txt.fontSize = fontSize;
+        txt.fontStyle = FontStyle.Bold;
+        txt.alignment = alignment;
+        txt.color = Color.white;
+        txt.raycastTarget = false;
+
+        Outline outline = go.GetComponent<Outline>();
+        outline.effectColor = new Color(0f, 0f, 0f, 0.92f);
+        outline.effectDistance = new Vector2(1f, -1f);
+        outline.useGraphicAlpha = true;
+        return txt;
+    }
+
+    void LayoutSwapText(RectTransform rt, Vector2 anchorMin, Vector2 anchorMax)
+    {
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+    }
+
+    Image CreateSwapBar(string name, RectTransform parent, Color color, Vector2 anchorMin, Vector2 anchorMax)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Outline));
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+
+        Image img = go.GetComponent<Image>();
+        img.color = color;
+        img.raycastTarget = false;
+
+        Outline outline = go.GetComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(1f, 1f);
+        outline.useGraphicAlpha = true;
+        return img;
+    }
+
+    Image CreateSwapFill(RectTransform parent, Color color)
+    {
+        GameObject go = new GameObject("Fill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0f, 0f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(0f, 0.5f);
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+
+        Image img = go.GetComponent<Image>();
+        img.color = color;
+        img.type = Image.Type.Filled;
+        img.fillMethod = Image.FillMethod.Horizontal;
+        img.fillOrigin = (int)Image.OriginHorizontal.Left;
+        img.fillAmount = 1f;
+        img.raycastTarget = false;
+        return img;
+    }
+
+    void RefreshSwapMenuCards()
+    {
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null) return;
+
+        int count = Mathf.Min(6, playerParty.ActiveCreatures.Count);
+        int activeIndex = Mathf.Clamp(playerParty.ActivePartyIndex, 0, Mathf.Max(0, count - 1));
+        CreatureRegistry.Initialize();
+
+        for (int i = 0; i < swapCardViews.Count; i++)
+        {
+            SwapCardView view = swapCardViews[i];
+            if (view == null || view.root == null) continue;
+
+            bool hasCreature = i < count && playerParty.ActiveCreatures[i] != null;
+            CreatureInstance inst = hasCreature ? playerParty.ActiveCreatures[i] : null;
+            CreatureDefinition def = inst != null ? CreatureRegistry.Get(inst.definitionID) : null;
+
+            view.root.gameObject.SetActive(true);
+            view.button.interactable = false;
+
+            if (!hasCreature)
+            {
+                if (view.icon != null)
+                {
+                    view.icon.sprite = null;
+                    view.icon.enabled = false;
+                }
+                if (view.nameText != null) view.nameText.text = "--";
+                if (view.levelText != null) view.levelText.text = string.Empty;
+                if (view.hpText != null) view.hpText.text = string.Empty;
+                if (view.hpFill != null) view.hpFill.fillAmount = 0f;
+                if (view.xpFill != null) view.xpFill.fillAmount = 0f;
+                if (view.glass != null) view.glass.enabled = false;
+                continue;
+            }
+
+            string displayName = inst.DisplayName;
+            int level = Mathf.Max(1, inst.level);
+            int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, inst.soulTraits, level));
+            int curHp = Mathf.Clamp(inst.currentHP, 0, maxHp);
+            bool isActive = i == activeIndex;
+            bool selectable = !isActive && curHp > 0;
+
+            if (view.icon != null)
+            {
+                view.icon.sprite = ResolveSwapHeadSprite(def);
+                view.icon.enabled = view.icon.sprite != null;
+            }
+            if (view.nameText != null) view.nameText.text = string.IsNullOrWhiteSpace(displayName) ? "Creature" : displayName;
+            if (view.levelText != null) view.levelText.text = "Lv " + level;
+            if (view.hpText != null) view.hpText.text = curHp + "/" + maxHp;
+            if (view.hpFill != null) view.hpFill.fillAmount = Mathf.Clamp01((float)curHp / maxHp);
+            if (view.xpFill != null) view.xpFill.fillAmount = ComputeSwapXpRatio(inst);
+
+            if (view.glass != null)
+            {
+                view.glass.sprite = swapCardGlassSprite;
+                view.glass.enabled = isActive;
+            }
+
+            view.button.interactable = selectable;
+        }
+    }
+
+    float ComputeSwapXpRatio(CreatureInstance instance)
+    {
+        if (instance == null) return 0f;
+        int xpToLevel = Mathf.Max(20, instance.level * 12);
+        int accumulated = Mathf.Max(0, instance.totalBattles * 5);
+        int currentInLevel = accumulated % xpToLevel;
+        return Mathf.Clamp01((float)currentInLevel / xpToLevel);
+    }
+
+    Sprite ResolveSwapHeadSprite(CreatureDefinition def)
+    {
+        if (def == null || def.sprite == null) return null;
+
+        string id = string.IsNullOrWhiteSpace(def.creatureID) ? def.name : def.creatureID;
+        if (swapHeadSpriteCache.TryGetValue(id, out Sprite cached) && cached != null)
+        {
+            return cached;
+        }
+
+        Sprite source = def.sprite;
+        Rect src = source.textureRect;
+        float cropW = Mathf.Clamp(src.width * 0.92f, 8f, src.width);
+        float cropH = Mathf.Clamp(src.height * 0.58f, 8f, src.height);
+        float centerX = src.center.x;
+        float centerY = src.yMin + (src.height * 0.70f);
+
+        float x = Mathf.Clamp(centerX - cropW * 0.5f, src.xMin, src.xMax - cropW);
+        float y = Mathf.Clamp(centerY - cropH * 0.5f, src.yMin, src.yMax - cropH);
+        Rect crop = new Rect(Mathf.Round(x), Mathf.Round(y), Mathf.Round(cropW), Mathf.Round(cropH));
+
+        Sprite head = Sprite.Create(source.texture, crop, new Vector2(0.5f, 0.5f), source.pixelsPerUnit);
+        head.name = id + "_swap_head";
+        swapHeadSpriteCache[id] = head;
+        generatedSwapHeadSprites.Add(head);
+        return head;
+    }
+
+    void OnSwapCardSelected(int slotIndex)
+    {
+        if (!swapMenuOpen || turnResolutionInProgress || !inBattle || !waitingForPlayerMove) return;
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null) return;
+
+        int count = playerParty.ActiveCreatures.Count;
+        if (slotIndex < 0 || slotIndex >= count) return;
+
+        int currentIndex = Mathf.Clamp(playerParty.ActivePartyIndex, 0, Mathf.Max(0, count - 1));
+        if (slotIndex == currentIndex) return;
+
+        CreatureInstance target = playerParty.ActiveCreatures[slotIndex];
+        if (target == null)
+        {
+            SetMessage("Invalid party slot.");
+            return;
+        }
+
+        if (target.currentHP <= 0)
+        {
+            SetMessage(target.DisplayName + " has fainted.");
+            return;
+        }
+
+        if (playerCreature != null)
+        {
+            playerCreature.SyncInstanceRuntimeState();
+        }
+
+        playerParty.SetActivePartyIndex(slotIndex);
+        playerCreature = ResolvePlayerCombatant();
+
+        if (playerCreature != null && playerCreature.Instance != target)
+        {
+            CreatureDefinition def = CreatureRegistry.Get(target.definitionID);
+            if (def != null)
+            {
+                playerCreature.autoInitWhelpling = false;
+                playerCreature.InitFromDefinition(def, target);
+            }
+        }
+
+        if (playerCreature != null)
+        {
+            playerCreature.SyncInstanceRuntimeState();
+        }
+
+        waitingForPlayerMove = true;
+        turnResolutionInProgress = false;
+        UpdateCreatureSprites();
+        UpdateUI();
+        CloseSwapMenu(true);
+        SetMessage("Go, " + target.DisplayName + "!");
+        RefreshTurnInputState();
+    }
+
+    void OnSwapExitPressed()
+    {
+        if (!swapMenuOpen || swapMenuExitAnimating) return;
+        StartCoroutine(AnimateSwapExitAndClose());
+    }
+
+    IEnumerator AnimateSwapExitAndClose()
+    {
+        if (swapMenuExitButton == null)
+        {
+            CloseSwapMenu(true);
+            SetMessage("Choose an action.");
+            yield break;
+        }
+
+        swapMenuExitAnimating = true;
+        RectTransform rt = swapMenuExitButton.transform as RectTransform;
+        Vector3 baseScale = rt != null ? rt.localScale : Vector3.one;
+
+        float t = 0f;
+        float shrinkTime = 0.07f;
+        while (t < shrinkTime)
+        {
+            t += Time.unscaledDeltaTime;
+            float p = Mathf.Clamp01(t / shrinkTime);
+            if (rt != null) rt.localScale = Vector3.Lerp(baseScale, baseScale * 0.82f, p);
+            yield return null;
+        }
+
+        t = 0f;
+        float growTime = 0.08f;
+        while (t < growTime)
+        {
+            t += Time.unscaledDeltaTime;
+            float p = Mathf.Clamp01(t / growTime);
+            if (rt != null) rt.localScale = Vector3.Lerp(baseScale * 0.82f, baseScale * 1.08f, p);
+            yield return null;
+        }
+
+        t = 0f;
+        float settleTime = 0.07f;
+        while (t < settleTime)
+        {
+            t += Time.unscaledDeltaTime;
+            float p = Mathf.Clamp01(t / settleTime);
+            if (rt != null) rt.localScale = Vector3.Lerp(baseScale * 1.08f, baseScale, p);
+            yield return null;
+        }
+
+        if (rt != null) rt.localScale = baseScale;
+        swapMenuExitAnimating = false;
+
+        CloseSwapMenu(true);
+        SetMessage("Choose an action.");
+    }
+
+    void CloseSwapMenu(bool restoreActionMenu)
+    {
+        swapMenuOpen = false;
+        swapMenuExitAnimating = false;
+        if (swapMenuRoot != null)
+        {
+            swapMenuRoot.SetActive(false);
+        }
+
+        if (restoreActionMenu && inBattle)
+        {
+            if (movePanel != null) movePanel.SetActive(false);
+            SetActionMenuVisible(true);
+            SetBackButtonVisible(false);
+        }
+        RefreshTurnInputState();
     }
 
     void SelectMove(int index)
@@ -1564,6 +2284,12 @@ public class BattleSystem : MonoBehaviour
 
     void OnBackPressed()
     {
+        if (swapMenuOpen)
+        {
+            CloseSwapMenu(true);
+            SetMessage("Choose an action.");
+            return;
+        }
         if (movePanel != null) movePanel.SetActive(false);
         SetActionMenuVisible(true);
         SetBackButtonVisible(false);
@@ -2467,6 +3193,18 @@ public class BattleSystem : MonoBehaviour
 
         EnsureButtonLabels();
         EnsureBackButton();
+        EnsureSwapMenu();
+        if (swapMenuOpen)
+        {
+            if (swapMenuRoot != null)
+            {
+                swapMenuRoot.SetActive(true);
+                swapMenuRoot.transform.SetAsLastSibling();
+            }
+            RefreshSwapMenuCards();
+            SetActionMenuVisible(false);
+            SetBackButtonVisible(false);
+        }
         ApplyButtonSkins();
         UpdateCreatureSprites();
         ApplyCreatureIdleAnimation();
@@ -2488,7 +3226,7 @@ public class BattleSystem : MonoBehaviour
 
     void RefreshTurnInputState()
     {
-        bool allowInput = inBattle && waitingForPlayerMove;
+        bool allowInput = inBattle && waitingForPlayerMove && !swapMenuOpen;
         bool hasPlayerCreature = IsValidCombatant(playerCreature);
 
         if (attackButton != null) attackButton.interactable = allowInput && hasPlayerCreature;
@@ -2521,7 +3259,7 @@ public class BattleSystem : MonoBehaviour
 
         if (backButton != null)
         {
-            bool canBack = inBattle && movePanel != null && movePanel.activeSelf;
+            bool canBack = inBattle && !swapMenuOpen && movePanel != null && movePanel.activeSelf;
             backButton.interactable = canBack;
             UpdateButtonVisualState(backButton);
         }
