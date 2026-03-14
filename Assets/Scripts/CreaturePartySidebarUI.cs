@@ -79,11 +79,16 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private readonly List<GameObject> builtSlots = new List<GameObject>();
     private readonly Dictionary<string, Sprite> headSpriteCache = new Dictionary<string, Sprite>();
     private readonly List<Sprite> generatedHeadSprites = new List<Sprite>();
+    private Sprite neutralFillSprite;
     private bool uiDirty = true;
     private int lastRenderedCount = -1;
     private bool expandAllHeld;
     private bool expandHoldKeyDown;
     private float expandHoldKeyDownTime;
+    private static readonly Color HpGreen = new Color(0.20f, 0.82f, 0.24f, 1f);
+    private static readonly Color HpYellow = new Color(0.97f, 0.88f, 0.20f, 1f);
+    private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
+    private static readonly Color HpRed = new Color(0.90f, 0.18f, 0.18f, 1f);
 
     void Awake()
     {
@@ -127,6 +132,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
             RebuildUI();
         }
 
+        RefreshLiveSlotData();
         TickCardAnimations();
     }
 
@@ -148,6 +154,11 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
         generatedHeadSprites.Clear();
         headSpriteCache.Clear();
+        if (neutralFillSprite != null)
+        {
+            Destroy(neutralFillSprite);
+            neutralFillSprite = null;
+        }
     }
 
     private void EnsurePartySource()
@@ -446,11 +457,14 @@ public class CreaturePartySidebarUI : MonoBehaviour
         rt.offsetMax = Vector2.zero;
 
         Image img = go.GetComponent<Image>();
+        img.sprite = GetNeutralFillSprite();
         img.color = color;
         img.type = Image.Type.Filled;
         img.fillMethod = Image.FillMethod.Horizontal;
         img.fillOrigin = (int)Image.OriginHorizontal.Left;
         img.fillAmount = 1f;
+        img.preserveAspect = false;
+        img.material = null;
         img.raycastTarget = false;
 
         return img;
@@ -488,6 +502,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.hpText.text = curHp + "/" + maxHp;
 
         view.hpFill.fillAmount = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
+        view.hpFill.color = ResolveHpTierColor(view.hpFill.fillAmount);
         view.xpFill.fillAmount = ComputeXpRatio(instance);
 
         view.glass.sprite = glassOverlaySprite;
@@ -501,6 +516,72 @@ public class CreaturePartySidebarUI : MonoBehaviour
         LayoutText(view.nameText.rectTransform, new Vector2(0f, 0.72f), new Vector2(0.75f, 1f));
         LayoutText(view.levelText.rectTransform, new Vector2(0.75f, 0.72f), new Vector2(1f, 1f));
         LayoutText(view.hpText.rectTransform, new Vector2(0.55f, 0.28f), new Vector2(1f, 0.42f));
+    }
+
+    private void RefreshLiveSlotData()
+    {
+        if (partySource == null || partySource.ActiveCreatures == null || builtSlots.Count == 0) return;
+
+        int count = Mathf.Min(maxVisibleSlots, partySource.ActiveCreatures.Count);
+        int activeIndex = Mathf.Clamp(partySource.ActivePartyIndex, 0, Mathf.Max(0, count - 1));
+
+        for (int i = 0; i < builtSlots.Count; i++)
+        {
+            GameObject slotObj = builtSlots[i];
+            if (slotObj == null || !slotObj.activeSelf) continue;
+
+            PartySlotView view = slotObj.GetComponent<PartySlotView>();
+            if (view == null) continue;
+            if (i >= count) continue;
+
+            CreatureInstance instance = partySource.ActiveCreatures[i];
+            if (instance == null) continue;
+
+            CreatureDefinition def = CreatureRegistry.Get(instance.definitionID);
+            view.instance = instance;
+            view.definition = def;
+            view.isActive = i == activeIndex;
+
+            int level = Mathf.Max(1, instance.level);
+            int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, instance.soulTraits, level));
+            int curHp = Mathf.Clamp(instance.currentHP, 0, maxHp);
+            float hpRatio = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
+
+            if (view.nameText != null)
+            {
+                string displayName = instance.DisplayName;
+                view.nameText.text = string.IsNullOrWhiteSpace(displayName) ? "Creature" : displayName;
+            }
+            if (view.levelText != null) view.levelText.text = "Lv " + level;
+            if (view.hpText != null) view.hpText.text = curHp + "/" + maxHp;
+            if (view.hpFill != null)
+            {
+                view.hpFill.sprite = GetNeutralFillSprite();
+                view.hpFill.material = null;
+                view.hpFill.fillAmount = hpRatio;
+                view.hpFill.color = ResolveHpTierColor(hpRatio);
+            }
+            if (view.xpFill != null)
+            {
+                view.xpFill.sprite = GetNeutralFillSprite();
+                view.xpFill.material = null;
+                view.xpFill.fillAmount = ComputeXpRatio(instance);
+            }
+
+            if (view.background != null)
+            {
+                view.background.color = view.isActive ? activeMarkerColor : markerColor;
+            }
+        }
+    }
+
+    private Color ResolveHpTierColor(float ratio)
+    {
+        float clamped = Mathf.Clamp01(ratio);
+        if (clamped > 0.75f) return HpGreen;
+        if (clamped > 0.5f) return HpYellow;
+        if (clamped > 0.25f) return HpOrange;
+        return HpRed;
     }
 
     private void LayoutText(RectTransform rt, Vector2 anchorMin, Vector2 anchorMax)
@@ -612,6 +693,20 @@ public class CreaturePartySidebarUI : MonoBehaviour
         int accumulated = Mathf.Max(0, instance.totalBattles * 5);
         int currentInLevel = accumulated % xpToLevel;
         return Mathf.Clamp01((float)currentInLevel / xpToLevel);
+    }
+
+    private Sprite GetNeutralFillSprite()
+    {
+        if (neutralFillSprite != null) return neutralFillSprite;
+
+        Texture2D tex = Texture2D.whiteTexture;
+        neutralFillSprite = Sprite.Create(
+            tex,
+            new Rect(0f, 0f, tex.width, tex.height),
+            new Vector2(0.5f, 0.5f),
+            100f);
+        neutralFillSprite.name = "PartyNeutralFill";
+        return neutralFillSprite;
     }
 
     private Sprite ResolveHeadSprite(CreatureDefinition def)

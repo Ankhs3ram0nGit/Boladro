@@ -23,6 +23,8 @@ public class BattleSystem : MonoBehaviour
     public Text playerHpText;
     public Image playerHpBg;
     public Image playerHpFill;
+    public Image playerXpBg;
+    public Image playerXpFill;
 
     public Text enemyNameText;
     public Text enemyLevelText;
@@ -89,6 +91,8 @@ public class BattleSystem : MonoBehaviour
     private Button swapMenuExitButton;
     private bool swapMenuOpen;
     private bool swapMenuExitAnimating;
+    private bool swapSelectionForced;
+    private bool swapSelectionConsumesTurn = true;
     private readonly List<SwapCardView> swapCardViews = new List<SwapCardView>();
     private readonly Dictionary<string, Sprite> swapHeadSpriteCache = new Dictionary<string, Sprite>();
     private readonly List<Sprite> generatedSwapHeadSprites = new List<Sprite>();
@@ -225,6 +229,8 @@ public class BattleSystem : MonoBehaviour
         playerHpText = playerHpText ?? FindText(rootTf, "UIPanel/PlayerBar/PlayerHpText");
         playerHpBg = playerHpBg ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerHpBG");
         playerHpFill = playerHpFill ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerHpBG/PlayerHpFill");
+        playerXpBg = playerXpBg ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerXpBG");
+        playerXpFill = playerXpFill ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerXpBG/PlayerXpFill");
 
         enemyNameText = enemyNameText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyName");
         enemyTypesText = enemyTypesText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyTypes");
@@ -512,6 +518,8 @@ public class BattleSystem : MonoBehaviour
 
     void ApplyBarSprites()
     {
+        Sprite neutral = GetNeutralFillSprite();
+
         if (barBgTexture == null)
         {
             barBgTexture = Resources.Load<Texture2D>("UI/BattleBarBG");
@@ -523,7 +531,22 @@ public class BattleSystem : MonoBehaviour
             if (enemyHpBg != null) enemyHpBg.sprite = bg;
         }
 
-        Sprite fill = GetNeutralFillSprite();
+        if (playerHpBg != null)
+        {
+            if (playerHpBg.sprite == null && neutral != null) playerHpBg.sprite = neutral;
+            playerHpBg.color = new Color(0f, 0f, 0f, 0.94f);
+            playerHpBg.type = Image.Type.Simple;
+            playerHpBg.preserveAspect = false;
+        }
+        if (enemyHpBg != null)
+        {
+            if (enemyHpBg.sprite == null && neutral != null) enemyHpBg.sprite = neutral;
+            enemyHpBg.color = new Color(0f, 0f, 0f, 0.94f);
+            enemyHpBg.type = Image.Type.Simple;
+            enemyHpBg.preserveAspect = false;
+        }
+
+        Sprite fill = neutral;
         if (fill != null)
         {
             if (playerHpFill != null) playerHpFill.sprite = fill;
@@ -542,6 +565,23 @@ public class BattleSystem : MonoBehaviour
                 enemyHpFill.fillMethod = Image.FillMethod.Horizontal;
                 enemyHpFill.fillOrigin = 0;
                 enemyHpFill.preserveAspect = false;
+            }
+
+            if (playerXpBg != null)
+            {
+                playerXpBg.sprite = fill;
+                playerXpBg.type = Image.Type.Simple;
+                playerXpBg.preserveAspect = false;
+                playerXpBg.color = new Color(0f, 0f, 0f, 0.94f);
+            }
+            if (playerXpFill != null)
+            {
+                playerXpFill.sprite = fill;
+                playerXpFill.type = Image.Type.Filled;
+                playerXpFill.fillMethod = Image.FillMethod.Horizontal;
+                playerXpFill.fillOrigin = 0;
+                playerXpFill.preserveAspect = false;
+                playerXpFill.color = new Color(0.28f, 0.75f, 1f, 1f);
             }
         }
     }
@@ -1117,7 +1157,27 @@ public class BattleSystem : MonoBehaviour
 
     void OpenSwapMenu()
     {
-        if (swapMenuOpen) return;
+        OpenSwapMenuInternal(false, true, "Choose a creature to swap.");
+    }
+
+    void OpenForcedSwapMenuAfterFaint()
+    {
+        OpenSwapMenuInternal(true, false, "Your creature fainted. Choose another creature.");
+    }
+
+    void OpenSwapMenuInternal(bool forcedSelection, bool consumeTurnOnSelection, string message)
+    {
+        if (swapMenuOpen)
+        {
+            swapSelectionForced = forcedSelection;
+            swapSelectionConsumesTurn = consumeTurnOnSelection;
+            UpdateSwapMenuExitState();
+            RefreshSwapMenuCards();
+            if (!string.IsNullOrWhiteSpace(message)) SetMessage(message);
+            RefreshTurnInputState();
+            return;
+        }
+
         if (!inBattle || !waitingForPlayerMove || turnResolutionInProgress) return;
         EnsurePlayerPartySource();
         if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0)
@@ -1131,6 +1191,9 @@ public class BattleSystem : MonoBehaviour
         SetActionMenuVisible(false);
 
         EnsureSwapMenu();
+        swapSelectionForced = forcedSelection;
+        swapSelectionConsumesTurn = consumeTurnOnSelection;
+        UpdateSwapMenuExitState();
         RefreshSwapMenuCards();
 
         swapMenuOpen = true;
@@ -1141,7 +1204,7 @@ public class BattleSystem : MonoBehaviour
             swapMenuRoot.transform.SetAsLastSibling();
         }
 
-        SetMessage("Choose a creature to swap.");
+        if (!string.IsNullOrWhiteSpace(message)) SetMessage(message);
         RefreshTurnInputState();
     }
 
@@ -1280,11 +1343,21 @@ public class BattleSystem : MonoBehaviour
             swapMenuExitButton.transition = Selectable.Transition.ColorTint;
         }
 
+        UpdateSwapMenuExitState();
+
         swapMenuRoot.transform.SetAsLastSibling();
         if (!swapMenuOpen && swapMenuRoot.activeSelf)
         {
             swapMenuRoot.SetActive(false);
         }
+    }
+
+    void UpdateSwapMenuExitState()
+    {
+        if (swapMenuExitButton == null) return;
+        bool showExit = !swapSelectionForced;
+        swapMenuExitButton.gameObject.SetActive(showExit);
+        swapMenuExitButton.interactable = showExit;
     }
 
     RectTransform EnsureSwapColumn(Transform cardsRoot, string name)
@@ -1689,16 +1762,17 @@ public class BattleSystem : MonoBehaviour
             return;
         }
 
+        bool consumeTurnOnSelection = swapSelectionConsumesTurn;
         CloseSwapMenu(false);
         SetActionMenuVisible(false);
         SetBackButtonVisible(false);
         waitingForPlayerMove = false;
         turnResolutionInProgress = true;
         RefreshTurnInputState();
-        StartCoroutine(ResolveSwapTurn(slotIndex, target));
+        StartCoroutine(ResolveSwapTurn(slotIndex, target, consumeTurnOnSelection));
     }
 
-    IEnumerator ResolveSwapTurn(int swapSlotIndex, CreatureInstance swappedInInstance)
+    IEnumerator ResolveSwapTurn(int swapSlotIndex, CreatureInstance swappedInInstance, bool consumeTurnOnSelection)
     {
         if (!inBattle) yield break;
         if (playerCreature == null || enemyCreature == null)
@@ -1757,6 +1831,18 @@ public class BattleSystem : MonoBehaviour
         SetMessage("Go, " + swappedInName + "!");
         yield return new WaitForSeconds(actionPhaseDelay);
 
+        if (!consumeTurnOnSelection)
+        {
+            UpdateUI();
+            waitingForPlayerMove = true;
+            turnResolutionInProgress = false;
+            SetActionMenuVisible(true);
+            SetBackButtonVisible(false);
+            SetMessage("Choose an action.");
+            RefreshTurnInputState();
+            yield break;
+        }
+
         SetMessage("Opponent's turn.");
         yield return new WaitForSeconds(opponentTurnDelay);
 
@@ -1769,7 +1855,7 @@ public class BattleSystem : MonoBehaviour
         if (playerCreature == null || playerCreature.currentHP <= 0)
         {
             turnResolutionInProgress = false;
-            HandlePlayerDefeat();
+            HandlePlayerCreatureFaintInBattle();
             yield break;
         }
 
@@ -1834,6 +1920,7 @@ public class BattleSystem : MonoBehaviour
     void OnSwapExitPressed()
     {
         if (!swapMenuOpen || swapMenuExitAnimating) return;
+        if (swapSelectionForced) return;
         StartCoroutine(AnimateSwapExitAndClose());
     }
 
@@ -1891,6 +1978,8 @@ public class BattleSystem : MonoBehaviour
     {
         swapMenuOpen = false;
         swapMenuExitAnimating = false;
+        swapSelectionForced = false;
+        swapSelectionConsumesTurn = true;
         if (swapMenuRoot != null)
         {
             swapMenuRoot.SetActive(false);
@@ -1952,7 +2041,7 @@ public class BattleSystem : MonoBehaviour
         if (playerCreature.currentHP <= 0)
         {
             turnResolutionInProgress = false;
-            HandlePlayerDefeat();
+            HandlePlayerCreatureFaintInBattle();
             yield break;
         }
 
@@ -2316,6 +2405,76 @@ public class BattleSystem : MonoBehaviour
         return true;
     }
 
+    int FindFirstAliveBenchPartyIndex()
+    {
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0)
+        {
+            return -1;
+        }
+
+        int activeIndex = ResolveActivePartyIndexForCurrentBattleCreature(playerParty.ActiveCreatures.Count);
+        for (int i = 0; i < playerParty.ActiveCreatures.Count; i++)
+        {
+            if (i == activeIndex) continue;
+            CreatureInstance candidate = playerParty.ActiveCreatures[i];
+            if (candidate == null) continue;
+            if (candidate.currentHP > 0) return i;
+        }
+
+        return -1;
+    }
+
+    bool AnyPartyCreatureAlive()
+    {
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < playerParty.ActiveCreatures.Count; i++)
+        {
+            CreatureInstance c = playerParty.ActiveCreatures[i];
+            if (c != null && c.currentHP > 0) return true;
+        }
+
+        return false;
+    }
+
+    void HandlePlayerCreatureFaintInBattle()
+    {
+        if (!inBattle) return;
+
+        SyncActivePartyCreatureFromBattleState();
+        int aliveBenchIndex = FindFirstAliveBenchPartyIndex();
+        if (aliveBenchIndex >= 0)
+        {
+            waitingForPlayerMove = true;
+            turnResolutionInProgress = false;
+            if (movePanel != null) movePanel.SetActive(false);
+            SetActionMenuVisible(false);
+            SetBackButtonVisible(false);
+            OpenForcedSwapMenuAfterFaint();
+            RefreshTurnInputState();
+            return;
+        }
+
+        if (AnyPartyCreatureAlive())
+        {
+            waitingForPlayerMove = true;
+            turnResolutionInProgress = false;
+            if (movePanel != null) movePanel.SetActive(false);
+            SetActionMenuVisible(false);
+            SetBackButtonVisible(false);
+            OpenForcedSwapMenuAfterFaint();
+            RefreshTurnInputState();
+            return;
+        }
+
+        HandlePlayerDefeat();
+    }
+
     void HandlePlayerDefeat()
     {
         SetMessage("Your creature fainted!");
@@ -2352,6 +2511,7 @@ public class BattleSystem : MonoBehaviour
             if (playerHpText != null) playerHpText.text = playerCreature.currentHP + " / " + playerCreature.maxHP;
             float playerHpRatio = playerCreature.maxHP > 0 ? (float)playerCreature.currentHP / playerCreature.maxHP : 0f;
             ApplyHpFillVisual(playerHpFill, playerHpRatio);
+            if (playerXpFill != null) playerXpFill.fillAmount = ComputeSwapXpRatio(playerCreature.Instance);
         }
         else
         {
@@ -2360,6 +2520,7 @@ public class BattleSystem : MonoBehaviour
             if (playerTypesText != null) playerTypesText.text = "None";
             if (playerHpText != null) playerHpText.text = "-- / --";
             ApplyHpFillVisual(playerHpFill, 0f);
+            if (playerXpFill != null) playerXpFill.fillAmount = 0f;
         }
 
         if (enemyCreature != null)
@@ -2386,6 +2547,16 @@ public class BattleSystem : MonoBehaviour
         if (hpFill == null) return;
 
         float clamped = Mathf.Clamp01(ratio);
+        Sprite neutral = GetNeutralFillSprite();
+        if (neutral != null && hpFill.sprite != neutral)
+        {
+            hpFill.sprite = neutral;
+        }
+        hpFill.type = Image.Type.Filled;
+        hpFill.fillMethod = Image.FillMethod.Horizontal;
+        hpFill.fillOrigin = 0;
+        hpFill.preserveAspect = false;
+        hpFill.material = null;
         hpFill.fillAmount = clamped;
         hpFill.color = ResolveHpTierColor(clamped);
     }
@@ -2626,6 +2797,7 @@ public class BattleSystem : MonoBehaviour
         SafeLayoutStep("EnsureBottomFrame", EnsureBottomFrame);
         SafeLayoutStep("EnsureBackButton", EnsureBackButton);
         SafeLayoutStep("EnsureEnemyHpText", EnsureEnemyHpText);
+        SafeLayoutStep("EnsurePlayerXpBar", EnsurePlayerXpBar);
         SafeLayoutStep("EnsureMessagePresentation", EnsureMessagePresentation);
         RefreshTurnInputState();
     }
@@ -2932,6 +3104,58 @@ public class BattleSystem : MonoBehaviour
         }
 
         enemyHpText.transform.SetAsLastSibling();
+    }
+
+    void EnsurePlayerXpBar()
+    {
+        if (battleRoot == null) return;
+        RectTransform playerBar = FindRect(battleRoot.transform, "UIPanel/PlayerBar");
+        if (playerBar == null) return;
+
+        Transform bgTf = playerBar.Find("PlayerXpBG");
+        if (bgTf == null)
+        {
+            GameObject go = new GameObject("PlayerXpBG", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(playerBar, false);
+            bgTf = go.transform;
+        }
+
+        playerXpBg = bgTf.GetComponent<Image>();
+        RectTransform bgRt = playerXpBg.rectTransform;
+        bgRt.anchorMin = new Vector2(0.08f, 0.07f);
+        bgRt.anchorMax = new Vector2(0.88f, 0.14f);
+        bgRt.pivot = new Vector2(0.5f, 0.5f);
+        bgRt.offsetMin = Vector2.zero;
+        bgRt.offsetMax = Vector2.zero;
+        playerXpBg.raycastTarget = false;
+        playerXpBg.sprite = GetNeutralFillSprite();
+        playerXpBg.type = Image.Type.Simple;
+        playerXpBg.preserveAspect = false;
+        playerXpBg.color = new Color(0f, 0f, 0f, 0.94f);
+
+        Transform fillTf = bgTf.Find("PlayerXpFill");
+        if (fillTf == null)
+        {
+            GameObject go = new GameObject("PlayerXpFill", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(bgTf, false);
+            fillTf = go.transform;
+        }
+
+        playerXpFill = fillTf.GetComponent<Image>();
+        RectTransform fillRt = playerXpFill.rectTransform;
+        fillRt.anchorMin = new Vector2(0f, 0f);
+        fillRt.anchorMax = new Vector2(1f, 1f);
+        fillRt.pivot = new Vector2(0f, 0.5f);
+        fillRt.offsetMin = Vector2.zero;
+        fillRt.offsetMax = Vector2.zero;
+        playerXpFill.raycastTarget = false;
+        playerXpFill.sprite = GetNeutralFillSprite();
+        playerXpFill.type = Image.Type.Filled;
+        playerXpFill.fillMethod = Image.FillMethod.Horizontal;
+        playerXpFill.fillOrigin = 0;
+        playerXpFill.preserveAspect = false;
+        playerXpFill.material = null;
+        playerXpFill.color = new Color(0.28f, 0.75f, 1f, 1f);
     }
 
     void EnsureSpriteShadows()
@@ -3399,6 +3623,7 @@ public class BattleSystem : MonoBehaviour
             SetBackButtonVisible(false);
         }
         ApplyButtonSkins();
+        ApplyBarSprites();
         UpdateCreatureSprites();
         ApplyCreatureIdleAnimation();
         UpdateUI();
