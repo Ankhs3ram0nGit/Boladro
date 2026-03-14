@@ -1522,6 +1522,7 @@ public class BattleSystem : MonoBehaviour
     void RefreshSwapMenuCards()
     {
         EnsurePlayerPartySource();
+        SyncActivePartyCreatureFromBattleState();
         if (playerParty == null || playerParty.ActiveCreatures == null) return;
 
         int count = Mathf.Min(6, playerParty.ActiveCreatures.Count);
@@ -1571,7 +1572,12 @@ public class BattleSystem : MonoBehaviour
             if (view.nameText != null) view.nameText.text = string.IsNullOrWhiteSpace(displayName) ? "Creature" : displayName;
             if (view.levelText != null) view.levelText.text = "Lv " + level;
             if (view.hpText != null) view.hpText.text = curHp + "/" + maxHp;
-            if (view.hpFill != null) view.hpFill.fillAmount = Mathf.Clamp01((float)curHp / maxHp);
+            float hpRatio = Mathf.Clamp01((float)curHp / maxHp);
+            if (view.hpFill != null)
+            {
+                view.hpFill.fillAmount = hpRatio;
+                view.hpFill.color = ResolveHpTierColor(hpRatio);
+            }
             if (view.xpFill != null) view.xpFill.fillAmount = ComputeSwapXpRatio(inst);
 
             if (view.glass != null)
@@ -2287,6 +2293,7 @@ public class BattleSystem : MonoBehaviour
     {
         if (!inBattle || !waitingForPlayerMove || turnResolutionInProgress) return;
 
+        SyncActivePartyCreatureFromBattleState();
         waitingForPlayerMove = false;
         if (movePanel != null) movePanel.SetActive(false);
         SetActionMenuVisible(true);
@@ -2297,6 +2304,7 @@ public class BattleSystem : MonoBehaviour
 
     void UpdateUI()
     {
+        SyncActivePartyCreatureFromBattleState();
         EnsureEnemyHpText();
 
         if (playerCreature != null)
@@ -2342,23 +2350,54 @@ public class BattleSystem : MonoBehaviour
 
         float clamped = Mathf.Clamp01(ratio);
         hpFill.fillAmount = clamped;
+        hpFill.color = ResolveHpTierColor(clamped);
+    }
+
+    Color ResolveHpTierColor(float ratio)
+    {
+        float clamped = Mathf.Clamp01(ratio);
         // Requested tiers:
         // 100%-75% = green, 75%-50% = yellow, 50%-25% = orange, 25% and below = red.
-        if (clamped > 0.75f)
+        if (clamped > 0.75f) return HpGreen;
+        if (clamped > 0.5f) return HpYellow;
+        if (clamped > 0.25f) return HpOrange;
+        return HpRed;
+    }
+
+    void SyncActivePartyCreatureFromBattleState()
+    {
+        if (!inBattle) return;
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0) return;
+        if (playerCreature == null) return;
+
+        int idx = Mathf.Clamp(playerParty.ActivePartyIndex, 0, playerParty.ActiveCreatures.Count - 1);
+        CreatureInstance partyInstance = playerParty.ActiveCreatures[idx];
+        if (partyInstance == null) return;
+
+        if (playerCreature.Instance == partyInstance)
         {
-            hpFill.color = HpGreen;
+            playerCreature.SyncInstanceRuntimeState();
+            return;
         }
-        else if (clamped > 0.5f)
+
+        CreatureDefinition def = CreatureRegistry.Get(partyInstance.definitionID);
+        int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, partyInstance.soulTraits, Mathf.Max(1, partyInstance.level)));
+        partyInstance.currentHP = Mathf.Clamp(playerCreature.currentHP, 0, maxHp);
+
+        if (partyInstance.currentPP == null || partyInstance.currentPP.Length < 4)
         {
-            hpFill.color = HpYellow;
+            partyInstance.currentPP = new int[4];
         }
-        else if (clamped > 0.25f)
+
+        if (playerCreature.attacks != null)
         {
-            hpFill.color = HpOrange;
-        }
-        else
-        {
-            hpFill.color = HpRed;
+            for (int i = 0; i < Mathf.Min(playerCreature.attacks.Count, 4); i++)
+            {
+                AttackData atk = playerCreature.attacks[i];
+                if (atk == null) continue;
+                partyInstance.currentPP[i] = Mathf.Clamp(atk.currentPP, 0, atk.maxPP);
+            }
         }
     }
 
