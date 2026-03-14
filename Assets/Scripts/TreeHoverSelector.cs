@@ -90,6 +90,10 @@ public class TreeHoverSelector : MonoBehaviour
     public float woodCollectTargetYOffset = 0.45f;
     public int woodCollectSortingBoost = 60;
 
+    [Header("Drop Idle Float")]
+    [Min(0f)] public float dropFloatAmplitude = 0.045f;
+    [Min(0.01f)] public float dropFloatSpeed = 1.35f;
+
     [Header("Audio")]
     public AudioClip[] pickaxeHitSfx;
     [Range(0f, 1f)] public float pickaxeHitSfxVolume = 0.78f;
@@ -122,6 +126,8 @@ public class TreeHoverSelector : MonoBehaviour
         public float fallDuration;
         public float fallElapsed;
         public bool isFalling;
+        public Vector3 idleAnchor;
+        public float floatPhase;
         public Vector3 collectStart;
         public Vector3 collectTarget;
         public float collectElapsed;
@@ -1115,6 +1121,8 @@ public class TreeHoverSelector : MonoBehaviour
             fallDuration = fallDuration,
             fallElapsed = 0f,
             isFalling = true,
+            idleAnchor = fallTarget,
+            floatPhase = UnityEngine.Random.Range(0f, Mathf.PI * 2f),
             collectElapsed = 0f,
             isCollecting = false
         });
@@ -1231,6 +1239,8 @@ public class TreeHoverSelector : MonoBehaviour
                 continue;
             }
 
+            UpdateDropIdleFloat(drop);
+
             bool nearPlayer = Vector2.Distance(
                 new Vector2(transform.position.x, transform.position.y),
                 new Vector2(drop.root.position.x, drop.root.position.y))
@@ -1262,8 +1272,26 @@ public class TreeHoverSelector : MonoBehaviour
         if (t < 1f) return;
 
         drop.root.position = drop.fallTarget;
+        drop.idleAnchor = drop.fallTarget;
         drop.root.localScale = drop.baseScale;
         drop.isFalling = false;
+    }
+
+    void UpdateDropIdleFloat(ResourceDropEntry drop)
+    {
+        if (drop == null || drop.root == null) return;
+        float amp = Mathf.Max(0f, dropFloatAmplitude);
+        if (amp <= 0.0001f)
+        {
+            drop.root.position = drop.idleAnchor;
+            return;
+        }
+
+        float speed = Mathf.Max(0.01f, dropFloatSpeed);
+        float yOffset = Mathf.Sin((Time.time * speed) + drop.floatPhase) * amp;
+        Vector3 pos = drop.idleAnchor;
+        pos.y += yOffset;
+        drop.root.position = pos;
     }
 
     void StartDropCollectAnimation(ResourceDropEntry drop)

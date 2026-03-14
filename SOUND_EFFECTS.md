@@ -23,8 +23,23 @@ This file tracks SFX currently wired in code, plus reserved assignments.
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNMisc_HIT-Spell Hit_HY_PC-006.wav`
 - Creature level-up card animation pulse (after post-battle delay):
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNMisc_STEP-Bit Step_HY_PC-005.wav`
+- Dodge roll:
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_INTERFACE-Tonal Click_HY_PC-001.wav`
+- Walking footsteps (random, faint continuous while moving):
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-001.wav`
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-002.wav`
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-003.wav`
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-004.wav`
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-005.wav`
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-006.wav`
+- Hotbar mouse-wheel slot scroll:
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_USABLE-Toony Zap_HY_PC-001.wav`
 
 ## Reserved / Planned
 
 - Buff SFX assignment:
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNSynth_BUFF-Bonus Crit Chance_HY_PC-001.wav`
+- Revive SFX assignment:
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/MAGAngl_BUFF-Healing Gusts_HY_PC-004.wav`
+- Heal SFX assignment:
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/MAGSpel_CAST-Panicked_HY_PC-002.wav`

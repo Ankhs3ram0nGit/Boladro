@@ -1,9 +1,18 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerMover : MonoBehaviour
 {
+    private const string DodgeRollSfxPath = "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_INTERFACE-Tonal Click_HY_PC-001.wav";
+    private const string WalkSfxBasePath = "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-";
+    private const string WalkSfxSuffix = ".wav";
+    private const int WalkSfxStart = 1;
+    private const int WalkSfxEnd = 6;
+
     public float moveSpeed = 3.5f;
     public float runtimeSpeedMultiplier = 0.90f;
     public bool spriteFacesRight = true;
@@ -20,6 +29,12 @@ public class PlayerMover : MonoBehaviour
     public float idleBreathSpeed = 2.4f;
     public float idleSwayAngle = 1.2f;
     public float idleSwaySpeed = 1.1f;
+    [Header("Movement Audio")]
+    public AudioClip dodgeRollSfx;
+    public AudioClip[] walkingStepSfx;
+    [Range(0f, 1f)] public float dodgeRollSfxVolume = 0.85f;
+    [Range(0f, 1f)] public float walkSfxVolume = 0.11f;
+    [Min(0.05f)] public float walkSfxInterval = 0.23f;
 
     private Rigidbody2D rb;
     private Vector2 input;
@@ -41,6 +56,9 @@ public class PlayerMover : MonoBehaviour
     private Transform rollVisualTransform;
     private SpriteRenderer rollVisualRenderer;
     private BattleSystem battleSystem;
+    private AudioSource movementSfxSource;
+    private float walkSfxTimer;
+    private bool attemptedMovementAudioLoad;
 
     void Awake()
     {
@@ -60,6 +78,8 @@ public class PlayerMover : MonoBehaviour
         EnsureRollVisual();
         ShowRootVisual();
         battleSystem = GetComponent<BattleSystem>();
+        EnsureMovementAudioSource();
+        EnsureMovementAudioAssets();
 
         rollFilter.useTriggers = false;
         rollFilter.useLayerMask = true;
@@ -103,6 +123,7 @@ public class PlayerMover : MonoBehaviour
 
         EnsureOpaqueBody();
         ApplyLocomotionVisualAnimation();
+        TickWalkAudio();
 
         if (!isRolling && sr != null)
         {
@@ -258,6 +279,7 @@ public class PlayerMover : MonoBehaviour
         rollCooldownRemaining = Mathf.Max(0f, rollCooldown);
         rollSpinDirection = ResolveRollSpinDirection(rollDirection);
         ShowRollVisual();
+        PlayDodgeRollSfx();
 
         if (playerHealth != null)
         {
@@ -529,5 +551,93 @@ public class PlayerMover : MonoBehaviour
             return rollVisualTransform;
         }
         return transform;
+    }
+
+    void EnsureMovementAudioSource()
+    {
+        if (movementSfxSource != null) return;
+        movementSfxSource = gameObject.AddComponent<AudioSource>();
+        movementSfxSource.playOnAwake = false;
+        movementSfxSource.loop = false;
+        movementSfxSource.spatialBlend = 0f;
+    }
+
+    void EnsureMovementAudioAssets()
+    {
+        if (attemptedMovementAudioLoad) return;
+        attemptedMovementAudioLoad = true;
+
+#if UNITY_EDITOR
+        if (dodgeRollSfx == null)
+        {
+            dodgeRollSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(DodgeRollSfxPath);
+        }
+
+        bool hasWalk = false;
+        if (walkingStepSfx != null)
+        {
+            for (int i = 0; i < walkingStepSfx.Length; i++)
+            {
+                if (walkingStepSfx[i] != null)
+                {
+                    hasWalk = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasWalk)
+        {
+            var loaded = new System.Collections.Generic.List<AudioClip>(WalkSfxEnd - WalkSfxStart + 1);
+            for (int i = WalkSfxStart; i <= WalkSfxEnd; i++)
+            {
+                string path = WalkSfxBasePath + i.ToString("000") + WalkSfxSuffix;
+                AudioClip clip = AssetDatabase.LoadAssetAtPath<AudioClip>(path);
+                if (clip != null) loaded.Add(clip);
+            }
+            if (loaded.Count > 0) walkingStepSfx = loaded.ToArray();
+        }
+#endif
+    }
+
+    void PlayDodgeRollSfx()
+    {
+        EnsureMovementAudioSource();
+        EnsureMovementAudioAssets();
+        if (movementSfxSource == null || dodgeRollSfx == null) return;
+        movementSfxSource.PlayOneShot(dodgeRollSfx, Mathf.Clamp01(dodgeRollSfxVolume));
+    }
+
+    void TickWalkAudio()
+    {
+        if (isRolling || input.sqrMagnitude <= 0.0001f)
+        {
+            walkSfxTimer = 0f;
+            return;
+        }
+
+        walkSfxTimer -= Time.deltaTime;
+        if (walkSfxTimer > 0f) return;
+
+        PlayRandomWalkSfx();
+        walkSfxTimer = Mathf.Max(0.05f, walkSfxInterval);
+    }
+
+    void PlayRandomWalkSfx()
+    {
+        EnsureMovementAudioSource();
+        EnsureMovementAudioAssets();
+        if (movementSfxSource == null || walkingStepSfx == null || walkingStepSfx.Length == 0) return;
+
+        AudioClip selected = null;
+        int guard = 0;
+        while (selected == null && guard < 10)
+        {
+            guard++;
+            selected = walkingStepSfx[Random.Range(0, walkingStepSfx.Length)];
+        }
+
+        if (selected == null) return;
+        movementSfxSource.PlayOneShot(selected, Mathf.Clamp01(walkSfxVolume));
     }
 }

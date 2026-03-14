@@ -1498,7 +1498,8 @@ public class BattleSystem : MonoBehaviour
                     }
                 }
                 liveText.alignment = TextAnchor.MiddleCenter;
-                liveText.color = new Color(0.08f, 0.08f, 0.10f, 1f);
+                liveText.color = Color.white;
+                EnsureButtonLabelOutline(liveText);
             }
             if (moveButtons[i] != null)
             {
@@ -4621,6 +4622,7 @@ public class BattleSystem : MonoBehaviour
     {
         if (button == null) return;
         int moveButtonIndex = ResolveMoveButtonIndex(button);
+        bool isMoveButton = moveButtonIndex >= 0;
         Color buttonFaceColor = Color.white;
         Image image = button.GetComponent<Image>();
         if (image != null)
@@ -4629,7 +4631,7 @@ public class BattleSystem : MonoBehaviour
             {
                 buttonFaceColor = new Color(0.55f, 0.55f, 0.55f, 1f);
             }
-            else if (moveButtonIndex >= 0)
+            else if (isMoveButton)
             {
                 buttonFaceColor = ResolveMoveButtonFaceColor(moveButtonIndex);
             }
@@ -4646,24 +4648,24 @@ public class BattleSystem : MonoBehaviour
         {
             Text label = labels[i];
             if (label == null) continue;
+            EnsureButtonLabelOutline(label);
             if (button == backButton)
             {
                 label.color = button.interactable
                     ? new Color(0.08f, 0.08f, 0.10f, 1f)
                     : new Color(0.40f, 0.40f, 0.42f, 1f);
             }
+            else if (isMoveButton)
+            {
+                label.color = button.interactable
+                    ? Color.white
+                    : new Color(0.82f, 0.82f, 0.82f, 1f);
+            }
             else
             {
-                if (button.interactable && moveButtonIndex >= 0)
-                {
-                    label.color = ResolveReadableButtonTextColor(buttonFaceColor);
-                }
-                else
-                {
-                    label.color = button.interactable
-                        ? Color.white
-                        : new Color(0.82f, 0.82f, 0.82f, 1f);
-                }
+                label.color = button.interactable
+                    ? Color.white
+                    : new Color(0.82f, 0.82f, 0.82f, 1f);
             }
         }
     }
@@ -4684,7 +4686,24 @@ public class BattleSystem : MonoBehaviour
         if (moveButtonIndex < 0 || moveButtonIndex >= playerCreature.attacks.Count) return TypeNormal;
         AttackData atk = playerCreature.attacks[moveButtonIndex];
         if (atk == null) return TypeNormal;
-        return ResolveTypeButtonColor(atk.type);
+        return ResolveDisplayMoveButtonColor(ResolveTypeButtonColor(atk.type));
+    }
+
+    Color ResolveDisplayMoveButtonColor(Color typeColor)
+    {
+        // Keep type identity while avoiding a "disabled" dark look on textured buttons.
+        Color c = Color.Lerp(typeColor, Color.white, 0.18f);
+        c.a = 1f;
+        return c;
+    }
+
+    void EnsureButtonLabelOutline(Text label)
+    {
+        if (label == null) return;
+        Outline o = label.GetComponent<Outline>();
+        if (o == null) o = label.gameObject.AddComponent<Outline>();
+        o.effectColor = new Color(0f, 0f, 0f, 0.95f);
+        o.effectDistance = new Vector2(2f, -2f);
     }
 
     Color ResolveTypeButtonColor(CreatureType type)

@@ -60,6 +60,8 @@ public class InventoryUI : MonoBehaviour
     public int slotInnerPadding = 6;
     public int selectedHotbarIndex = 0;
     public AudioClip inventorySlotSelectSfx;
+    public AudioClip hotbarScrollSfx;
+    [Range(0f, 1f)] public float hotbarScrollSfxVolume = 0.5f;
 
     private InventorySlotUI[] hotbarSlots;
     private InventorySlotUI[] bagSlots;
@@ -572,12 +574,14 @@ public class InventoryUI : MonoBehaviour
             {
                 int next = (selectedHotbarIndex - 1 + inventory.hotbar.Length) % inventory.hotbar.Length;
                 SelectHotbar(next);
+                PlayHotbarScrollSfx();
                 return;
             }
             if (scroll < -0.01f)
             {
                 int next = (selectedHotbarIndex + 1) % inventory.hotbar.Length;
                 SelectHotbar(next);
+                PlayHotbarScrollSfx();
                 return;
             }
         }
@@ -2720,6 +2724,11 @@ public class InventoryUI : MonoBehaviour
             inventorySlotSelectSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
                 "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/Text 1.wav");
         }
+        if (hotbarScrollSfx == null)
+        {
+            hotbarScrollSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_USABLE-Toony Zap_HY_PC-001.wav");
+        }
 #endif
     }
 
@@ -2739,6 +2748,14 @@ public class InventoryUI : MonoBehaviour
         EnsureInventoryUiSfxSource();
         if (inventoryUiSfxSource == null) return;
         inventoryUiSfxSource.PlayOneShot(inventorySlotSelectSfx);
+    }
+
+    void PlayHotbarScrollSfx()
+    {
+        if (hotbarScrollSfx == null) return;
+        EnsureInventoryUiSfxSource();
+        if (inventoryUiSfxSource == null) return;
+        inventoryUiSfxSource.PlayOneShot(hotbarScrollSfx, Mathf.Clamp01(hotbarScrollSfxVolume));
     }
 
 #if UNITY_EDITOR
