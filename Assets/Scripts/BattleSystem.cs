@@ -60,7 +60,7 @@ public class BattleSystem : MonoBehaviour
     public Vector2 engageDebugPanelSize = new Vector2(560f, 190f);
     [Header("Swap Menu")]
     [Range(0f, 1f)] public float swapOverlayOpacity = 0.72f;
-    [Range(0.2f, 1f)] public float swapActiveCardOpacity = 0.75f;
+    [Range(0.2f, 1f)] public float swapActiveCardOpacity = 0.5f;
     public Sprite swapCardBackgroundSprite;
     public Sprite swapCardGlassSprite;
     public Sprite swapExitIconSprite;
@@ -108,6 +108,7 @@ public class BattleSystem : MonoBehaviour
     private readonly HashSet<Image> activeAttackAnimations = new HashSet<Image>();
     private readonly Dictionary<CreatureCombatant, int> guaranteedDodgeCharges = new Dictionary<CreatureCombatant, int>();
     private Sprite shadowEllipseSprite;
+    private Sprite neutralFillSprite;
     private Vector3 playerSpriteBaseLocalPos;
     private Vector3 enemySpriteBaseLocalPos;
     private Vector3 playerSpriteBaseLocalScale = Vector3.one;
@@ -471,6 +472,15 @@ public class BattleSystem : MonoBehaviour
         return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
     }
 
+    Sprite GetNeutralFillSprite()
+    {
+        if (neutralFillSprite != null) return neutralFillSprite;
+        Texture2D tex = Texture2D.whiteTexture;
+        neutralFillSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+        neutralFillSprite.name = "BattleNeutralFill";
+        return neutralFillSprite;
+    }
+
     void ApplyButtonSkin(Button button, Sprite normal, Sprite highlighted, Sprite pressed)
     {
         if (button == null) return;
@@ -506,11 +516,6 @@ public class BattleSystem : MonoBehaviour
         {
             barBgTexture = Resources.Load<Texture2D>("UI/BattleBarBG");
         }
-        if (barFillTexture == null)
-        {
-            barFillTexture = Resources.Load<Texture2D>("UI/BattleBarFill");
-        }
-
         if (barBgTexture != null)
         {
             Sprite bg = Sprite.Create(barBgTexture, new Rect(0, 0, barBgTexture.width, barBgTexture.height), new Vector2(0.5f, 0.5f), 100f);
@@ -518,9 +523,9 @@ public class BattleSystem : MonoBehaviour
             if (enemyHpBg != null) enemyHpBg.sprite = bg;
         }
 
-        if (barFillTexture != null)
+        Sprite fill = GetNeutralFillSprite();
+        if (fill != null)
         {
-            Sprite fill = Sprite.Create(barFillTexture, new Rect(0, 0, barFillTexture.width, barFillTexture.height), new Vector2(0.5f, 0.5f), 100f);
             if (playerHpFill != null) playerHpFill.sprite = fill;
             if (enemyHpFill != null) enemyHpFill.sprite = fill;
 
@@ -529,12 +534,14 @@ public class BattleSystem : MonoBehaviour
                 playerHpFill.type = Image.Type.Filled;
                 playerHpFill.fillMethod = Image.FillMethod.Horizontal;
                 playerHpFill.fillOrigin = 0;
+                playerHpFill.preserveAspect = false;
             }
             if (enemyHpFill != null)
             {
                 enemyHpFill.type = Image.Type.Filled;
                 enemyHpFill.fillMethod = Image.FillMethod.Horizontal;
                 enemyHpFill.fillOrigin = 0;
+                enemyHpFill.preserveAspect = false;
             }
         }
     }
@@ -1500,11 +1507,13 @@ public class BattleSystem : MonoBehaviour
         rt.offsetMax = Vector2.zero;
 
         Image img = go.GetComponent<Image>();
+        img.sprite = GetNeutralFillSprite();
         img.color = color;
         img.type = Image.Type.Filled;
         img.fillMethod = Image.FillMethod.Horizontal;
         img.fillOrigin = (int)Image.OriginHorizontal.Left;
         img.fillAmount = 1f;
+        img.preserveAspect = false;
         img.raycastTarget = false;
         return img;
     }
@@ -1516,7 +1525,7 @@ public class BattleSystem : MonoBehaviour
         if (playerParty == null || playerParty.ActiveCreatures == null) return;
 
         int count = Mathf.Min(6, playerParty.ActiveCreatures.Count);
-        int activeIndex = Mathf.Clamp(playerParty.ActivePartyIndex, 0, Mathf.Max(0, count - 1));
+        int activeIndex = ResolveActivePartyIndexForCurrentBattleCreature(count);
         CreatureRegistry.Initialize();
 
         for (int i = 0; i < swapCardViews.Count; i++)
@@ -1547,11 +1556,21 @@ public class BattleSystem : MonoBehaviour
                 continue;
             }
 
-            string displayName = inst.DisplayName;
-            int level = Mathf.Max(1, inst.level);
-            int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, inst.soulTraits, level));
-            int curHp = Mathf.Clamp(inst.currentHP, 0, maxHp);
             bool isActive = i == activeIndex;
+            int level = Mathf.Max(1, inst.level);
+            int maxHp;
+            int curHp;
+            if (isActive && inBattle && playerCreature != null)
+            {
+                curHp = Mathf.Max(0, playerCreature.currentHP);
+                maxHp = Mathf.Max(1, playerCreature.maxHP);
+            }
+            else
+            {
+                maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, inst.soulTraits, level));
+                curHp = Mathf.Clamp(inst.currentHP, 0, maxHp);
+            }
+            string displayName = inst.DisplayName;
             bool selectable = !isActive && curHp > 0;
             if (view.canvasGroup != null)
             {
@@ -1593,6 +1612,30 @@ public class BattleSystem : MonoBehaviour
         return Mathf.Clamp01((float)currentInLevel / xpToLevel);
     }
 
+    int ResolveActivePartyIndexForCurrentBattleCreature(int countLimit)
+    {
+        if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0)
+        {
+            return 0;
+        }
+
+        int count = Mathf.Clamp(countLimit, 0, playerParty.ActiveCreatures.Count);
+        if (count <= 0) return 0;
+
+        if (inBattle && playerCreature != null && playerCreature.Instance != null)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (ReferenceEquals(playerParty.ActiveCreatures[i], playerCreature.Instance))
+                {
+                    return i;
+                }
+            }
+        }
+
+        return Mathf.Clamp(playerParty.ActivePartyIndex, 0, count - 1);
+    }
+
     Sprite ResolveSwapHeadSprite(CreatureDefinition def)
     {
         if (def == null || def.sprite == null) return null;
@@ -1630,7 +1673,7 @@ public class BattleSystem : MonoBehaviour
         int count = playerParty.ActiveCreatures.Count;
         if (slotIndex < 0 || slotIndex >= count) return;
 
-        int currentIndex = Mathf.Clamp(playerParty.ActivePartyIndex, 0, Mathf.Max(0, count - 1));
+        int currentIndex = ResolveActivePartyIndexForCurrentBattleCreature(count);
         if (slotIndex == currentIndex) return;
 
         CreatureInstance target = playerParty.ActiveCreatures[slotIndex];
@@ -2365,7 +2408,11 @@ public class BattleSystem : MonoBehaviour
         if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0) return;
         if (playerCreature == null) return;
 
-        int idx = Mathf.Clamp(playerParty.ActivePartyIndex, 0, playerParty.ActiveCreatures.Count - 1);
+        int idx = ResolveActivePartyIndexForCurrentBattleCreature(playerParty.ActiveCreatures.Count);
+        if (idx != playerParty.ActivePartyIndex)
+        {
+            playerParty.SetActivePartyIndex(idx);
+        }
         CreatureInstance partyInstance = playerParty.ActiveCreatures[idx];
         if (partyInstance == null) return;
 
@@ -2376,7 +2423,9 @@ public class BattleSystem : MonoBehaviour
         }
 
         CreatureDefinition def = CreatureRegistry.Get(partyInstance.definitionID);
-        int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, partyInstance.soulTraits, Mathf.Max(1, partyInstance.level)));
+        int maxHp = def != null
+            ? Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, partyInstance.soulTraits, Mathf.Max(1, partyInstance.level)))
+            : Mathf.Max(1, playerCreature.maxHP);
         partyInstance.currentHP = Mathf.Clamp(playerCreature.currentHP, 0, maxHp);
 
         if (partyInstance.currentPP == null || partyInstance.currentPP.Length < 4)
