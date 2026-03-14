@@ -218,6 +218,30 @@ public class PlayerCreatureParty : MonoBehaviour
         return true;
     }
 
+    public bool TrySwapCreaturesAtSlots(int firstSlotIndex, int secondSlotIndex)
+    {
+        if (firstSlotIndex < 0 || secondSlotIndex < 0) return false;
+        if (firstSlotIndex >= activeCreatures.Count || secondSlotIndex >= activeCreatures.Count) return false;
+        if (firstSlotIndex == secondSlotIndex) return true;
+
+        CreatureInstance first = activeCreatures[firstSlotIndex];
+        CreatureInstance second = activeCreatures[secondSlotIndex];
+        activeCreatures[firstSlotIndex] = second;
+        activeCreatures[secondSlotIndex] = first;
+
+        if (activePartyIndex == firstSlotIndex)
+        {
+            activePartyIndex = secondSlotIndex;
+        }
+        else if (activePartyIndex == secondSlotIndex)
+        {
+            activePartyIndex = firstSlotIndex;
+        }
+
+        PartyChanged?.Invoke();
+        return true;
+    }
+
     public bool TryAddCapturedCreature(CreatureInstance instance, bool makeActive = false)
     {
         if (instance == null) return false;

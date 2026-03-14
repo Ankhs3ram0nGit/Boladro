@@ -948,8 +948,8 @@ public class InventoryUI : MonoBehaviour
         else if (dragMode == DragMode.CreatureParty)
         {
             int sourcePartyIndex = draggingCreaturePartyIndex;
-            CreatureInstance moving;
-            if (!party.TryTakeCreatureAtSlot(sourcePartyIndex, out moving) || moving == null)
+            CreatureInstance moving = party.GetCreatureAt(sourcePartyIndex);
+            if (moving == null)
             {
                 EndCreatureDrag();
                 return;
@@ -958,22 +958,25 @@ public class InventoryUI : MonoBehaviour
             CreatureInstance replaced;
             if (!storage.TrySetAt(targetStorageIndex, moving, out replaced))
             {
-                party.TrySetCreatureAtSlot(sourcePartyIndex, moving, out _);
                 EndCreatureDrag();
                 return;
             }
 
             if (replaced != null)
             {
-                CreatureInstance displaced;
-                if (!party.TrySetCreatureAtSlot(sourcePartyIndex, replaced, out displaced))
+                // True exchange: occupied storage slot creature replaces source party slot.
+                if (!party.TrySetCreatureAtSlot(sourcePartyIndex, replaced, out _))
                 {
-                    storage.TryStoreCreature(replaced);
+                    // Roll back storage if party write unexpectedly fails.
+                    storage.TrySetAt(targetStorageIndex, replaced, out _);
+                    EndCreatureDrag();
+                    return;
                 }
-                else if (displaced != null)
-                {
-                    storage.TryStoreCreature(displaced);
-                }
+            }
+            else
+            {
+                // Moving to an empty storage slot removes creature from party.
+                party.TryTakeCreatureAtSlot(sourcePartyIndex, out _);
             }
 
             selectedCreatureFromParty = false;
@@ -1037,32 +1040,18 @@ public class InventoryUI : MonoBehaviour
                 return;
             }
 
-            CreatureInstance moving;
-            if (!party.TryTakeCreatureAtSlot(sourcePartyIndex, out moving) || moving == null)
+            int partyCount = party.PartyCount;
+            if (sourcePartyIndex < 0 || sourcePartyIndex >= partyCount || targetPartyIndex < 0 || targetPartyIndex >= partyCount)
             {
                 EndCreatureDrag();
                 return;
             }
 
-            CreatureInstance replaced;
-            if (!party.TrySetCreatureAtSlot(targetPartyIndex, moving, out replaced))
+            // True in-place swap: no remove/insert, no shifting, no storage fallback side-effects.
+            if (!party.TrySwapCreaturesAtSlots(sourcePartyIndex, targetPartyIndex))
             {
-                party.TrySetCreatureAtSlot(sourcePartyIndex, moving, out _);
                 EndCreatureDrag();
                 return;
-            }
-
-            if (replaced != null)
-            {
-                CreatureInstance displaced;
-                if (!party.TrySetCreatureAtSlot(sourcePartyIndex, replaced, out displaced))
-                {
-                    storage.TryStoreCreature(replaced);
-                }
-                else if (displaced != null)
-                {
-                    storage.TryStoreCreature(displaced);
-                }
             }
 
             selectedCreatureFromParty = true;
