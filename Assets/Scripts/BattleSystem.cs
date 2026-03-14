@@ -117,6 +117,8 @@ public class BattleSystem : MonoBehaviour
     private Vector3 enemySpriteBaseLocalPos;
     private Vector3 playerSpriteBaseLocalScale = Vector3.one;
     private Vector3 enemySpriteBaseLocalScale = Vector3.one;
+    private bool playerFaintedVisualLocked;
+    private bool enemyFaintedVisualLocked;
     private static readonly Color HpGreen = new Color(0.20f, 0.82f, 0.24f, 1f);
     private static readonly Color HpYellow = new Color(0.97f, 0.88f, 0.20f, 1f);
     private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
@@ -146,6 +148,8 @@ public class BattleSystem : MonoBehaviour
         inBattle = false;
         waitingForPlayerMove = false;
         turnResolutionInProgress = false;
+        playerFaintedVisualLocked = false;
+        enemyFaintedVisualLocked = false;
         IsEngagedBattleActive = false;
     }
 
@@ -175,6 +179,8 @@ public class BattleSystem : MonoBehaviour
         inBattle = false;
         waitingForPlayerMove = false;
         turnResolutionInProgress = false;
+        playerFaintedVisualLocked = false;
+        enemyFaintedVisualLocked = false;
         runtimeLayoutInitialized = false;
         lastLayoutScreenSize = Vector2Int.zero;
         hudWasHiddenForBattle = false;
@@ -877,6 +883,8 @@ public class BattleSystem : MonoBehaviour
         inBattle = true;
         IsEngagedBattleActive = true;
         waitingForPlayerMove = true;
+        playerFaintedVisualLocked = false;
+        enemyFaintedVisualLocked = false;
         hudWasHiddenForBattle = false;
         turnResolutionInProgress = false;
         runtimeLayoutInitialized = false;
@@ -1079,6 +1087,8 @@ public class BattleSystem : MonoBehaviour
         IsEngagedBattleActive = false;
         waitingForPlayerMove = false;
         turnResolutionInProgress = false;
+        playerFaintedVisualLocked = false;
+        enemyFaintedVisualLocked = false;
         guaranteedDodgeCharges.Clear();
 
         if (battleRoot != null) battleRoot.SetActive(false);
@@ -1665,10 +1675,12 @@ public class BattleSystem : MonoBehaviour
                 curHp = Mathf.Clamp(inst.currentHP, 0, maxHp);
             }
             string displayName = inst.DisplayName;
-            bool selectable = !isActive && curHp > 0;
+            bool isFainted = curHp <= 0;
+            bool selectable = !isActive && !isFainted;
             if (view.canvasGroup != null)
             {
-                view.canvasGroup.alpha = isActive ? Mathf.Clamp01(swapActiveCardOpacity) : 1f;
+                bool dimmed = isActive || isFainted;
+                view.canvasGroup.alpha = dimmed ? Mathf.Clamp01(swapActiveCardOpacity) : 1f;
             }
 
             if (view.icon != null)
@@ -1839,6 +1851,7 @@ public class BattleSystem : MonoBehaviour
             playerCreature.SyncInstanceRuntimeState();
         }
 
+        playerFaintedVisualLocked = false;
         UpdateCreatureSprites();
         UpdateUI();
         yield return StartCoroutine(AnimatePlayerSwapSlideIn());
@@ -2142,7 +2155,8 @@ public class BattleSystem : MonoBehaviour
         }
 
         bool isCrit = RollCrit(attacker);
-        int damage = CalculateDamage(attacker, defender, atk, isCrit);
+        float typeMultiplier = EvaluateTypeMultiplier(atk.type, defender);
+        int damage = CalculateDamage(attacker, defender, atk, isCrit, typeMultiplier);
 
         yield return StartCoroutine(AnimateAttack(attackerImage, defenderImage, atk.baseDamage > 0));
 
@@ -2164,6 +2178,21 @@ public class BattleSystem : MonoBehaviour
 
         SetMessage(attacker.creatureName + " used " + atk.name + "!");
         yield return new WaitForSeconds(actionNarrationDelay);
+
+        if (atk.baseDamage > 0)
+        {
+            string effectiveness = ResolveEffectivenessNarration(typeMultiplier);
+            if (!string.IsNullOrEmpty(effectiveness))
+            {
+                SetMessage(effectiveness);
+                yield return new WaitForSeconds(Mathf.Max(0.65f, actionNarrationDelay * 0.68f));
+            }
+        }
+
+        if (defender.currentHP <= 0)
+        {
+            yield return StartCoroutine(AnimateFaintShrink(defender));
+        }
     }
 
     bool RollAccuracy(int accuracy, CreatureCombatant attacker)
@@ -2195,7 +2224,7 @@ public class BattleSystem : MonoBehaviour
         return Random.value <= chance;
     }
 
-    int CalculateDamage(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk, bool isCrit)
+    int CalculateDamage(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk, bool isCrit, float typeMultiplier)
     {
         int dmg = isCrit ? atk.critDamage : atk.baseDamage;
         if (dmg <= 0) return 0;
@@ -2204,17 +2233,7 @@ public class BattleSystem : MonoBehaviour
         CreatureStats defenderStats = defender != null ? defender.GetFinalStats() : default;
         float attackVsDefense = Mathf.Max(0.4f, attackerStats.attack / Mathf.Max(1f, defenderStats.defense));
 
-        CreatureType[] defenderTypes = defender != null ? defender.GetResolvedTypes() : null;
-        if (defenderTypes == null || defenderTypes.Length == 0)
-        {
-            defenderTypes = new[] { CreatureType.Normal };
-        }
-
-        float multiplier = 1f;
-        for (int i = 0; i < defenderTypes.Length; i++)
-        {
-            multiplier *= TypeMultiplier(atk.type, defenderTypes[i]);
-        }
+        float multiplier = Mathf.Max(0f, typeMultiplier);
 
         if (attacker.HasStatus(StatusEffectType.Burn) && atk.isPhysical)
         {
@@ -2242,6 +2261,37 @@ public class BattleSystem : MonoBehaviour
         int finalDmg = Mathf.FloorToInt(dmg * attackVsDefense * multiplier);
         if (finalDmg < 1) finalDmg = 1;
         return finalDmg;
+    }
+
+    float EvaluateTypeMultiplier(CreatureType attackType, CreatureCombatant defender)
+    {
+        CreatureType[] defenderTypes = defender != null ? defender.GetResolvedTypes() : null;
+        if (defenderTypes == null || defenderTypes.Length == 0)
+        {
+            defenderTypes = new[] { CreatureType.Normal };
+        }
+
+        float multiplier = 1f;
+        for (int i = 0; i < defenderTypes.Length; i++)
+        {
+            multiplier *= TypeMultiplier(attackType, defenderTypes[i]);
+        }
+        return multiplier;
+    }
+
+    string ResolveEffectivenessNarration(float typeMultiplier)
+    {
+        if (Mathf.Abs(typeMultiplier - 0.5f) <= 0.02f)
+        {
+            return "It's weak... (0.5x)";
+        }
+
+        if (Mathf.Abs(typeMultiplier - 1.5f) <= 0.02f)
+        {
+            return "It's very strong! (1.5x)";
+        }
+
+        return string.Empty;
     }
 
     float TypeMultiplier(CreatureType atk, CreatureType def)
@@ -3433,6 +3483,54 @@ public class BattleSystem : MonoBehaviour
         targetRt.anchoredPosition = start;
     }
 
+    IEnumerator AnimateFaintShrink(CreatureCombatant faintedCombatant)
+    {
+        Image image = GetSpriteImageForCombatant(faintedCombatant);
+        if (image == null || image.rectTransform == null) yield break;
+
+        bool isPlayer = faintedCombatant != null && faintedCombatant == playerCreature;
+        if (isPlayer) playerFaintedVisualLocked = true;
+        else enemyFaintedVisualLocked = true;
+
+        RectTransform rt = image.rectTransform;
+        Vector3 startScale = rt.localScale;
+        Vector3 startPos = rt.localPosition;
+        float pivotToFeet = Mathf.Abs(startScale.y) * rt.rect.height * Mathf.Clamp01(rt.pivot.y);
+
+        Image shadow = isPlayer ? playerShadowImage : enemyShadowImage;
+        Color shadowStart = shadow != null ? shadow.color : Color.clear;
+
+        const float duration = 0.24f;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float p = Mathf.Clamp01(elapsed / duration);
+            float eased = 1f - Mathf.Pow(1f - p, 3f);
+            float scaleFactor = Mathf.Clamp01(1f - eased);
+
+            rt.localScale = new Vector3(startScale.x * scaleFactor, startScale.y * scaleFactor, startScale.z);
+            rt.localPosition = startPos + new Vector3(0f, -pivotToFeet * (1f - scaleFactor), 0f);
+
+            if (shadow != null)
+            {
+                Color c = shadowStart;
+                c.a = shadowStart.a * scaleFactor;
+                shadow.color = c;
+            }
+
+            yield return null;
+        }
+
+        rt.localScale = new Vector3(0f, 0f, startScale.z);
+        rt.localPosition = startPos + new Vector3(0f, -pivotToFeet, 0f);
+        if (shadow != null)
+        {
+            shadow.color = new Color(shadowStart.r, shadowStart.g, shadowStart.b, 0f);
+            shadow.enabled = false;
+        }
+    }
+
     void UpdateCreatureSprites()
     {
         Sprite playerSprite = ResolveCombatantSprite(playerCreature, true);
@@ -3446,7 +3544,10 @@ public class BattleSystem : MonoBehaviour
                 playerSpriteImage.preserveAspect = true;
                 float scale = ResolveBattleSpriteScale(playerCreature, playerSprite);
                 playerSpriteBaseLocalScale = new Vector3(-scale, scale, 1f);
-                playerSpriteImage.rectTransform.localScale = playerSpriteBaseLocalScale;
+                if (!playerFaintedVisualLocked)
+                {
+                    playerSpriteImage.rectTransform.localScale = playerSpriteBaseLocalScale;
+                }
                 playerSpriteImage.color = Color.white;
             }
             else
@@ -3454,6 +3555,7 @@ public class BattleSystem : MonoBehaviour
                 playerSpriteImage.sprite = null;
                 playerSpriteImage.color = Color.clear;
                 playerSpriteBaseLocalScale = Vector3.one;
+                playerFaintedVisualLocked = false;
             }
         }
 
@@ -3465,7 +3567,10 @@ public class BattleSystem : MonoBehaviour
                 enemySpriteImage.preserveAspect = true;
                 float scale = ResolveBattleSpriteScale(enemyCreature, enemySprite);
                 enemySpriteBaseLocalScale = new Vector3(scale, scale, 1f);
-                enemySpriteImage.rectTransform.localScale = enemySpriteBaseLocalScale;
+                if (!enemyFaintedVisualLocked)
+                {
+                    enemySpriteImage.rectTransform.localScale = enemySpriteBaseLocalScale;
+                }
                 enemySpriteImage.color = Color.white;
             }
             else
@@ -3473,6 +3578,7 @@ public class BattleSystem : MonoBehaviour
                 enemySpriteImage.sprite = null;
                 enemySpriteImage.color = Color.clear;
                 enemySpriteBaseLocalScale = Vector3.one;
+                enemyFaintedVisualLocked = false;
             }
         }
     }
@@ -3739,7 +3845,8 @@ public class BattleSystem : MonoBehaviour
     {
         float t = Time.unscaledTime;
 
-        if (playerSpriteImage != null && playerSpriteImage.sprite != null && !activeAttackAnimations.Contains(playerSpriteImage))
+        if (playerSpriteImage != null && playerSpriteImage.sprite != null &&
+            !activeAttackAnimations.Contains(playerSpriteImage) && !playerFaintedVisualLocked)
         {
             float breathe = (Mathf.Sin(t * 1.9f + 0.15f) + 1f) * 0.5f;
             float ySquash = 1f - (breathe * 0.05f);
@@ -3754,7 +3861,8 @@ public class BattleSystem : MonoBehaviour
             }
         }
 
-        if (enemySpriteImage != null && enemySpriteImage.sprite != null && !activeAttackAnimations.Contains(enemySpriteImage))
+        if (enemySpriteImage != null && enemySpriteImage.sprite != null &&
+            !activeAttackAnimations.Contains(enemySpriteImage) && !enemyFaintedVisualLocked)
         {
             float breathe = (Mathf.Sin(t * 1.9f + 1.1f) + 1f) * 0.5f;
             float ySquash = 1f - (breathe * 0.05f);
