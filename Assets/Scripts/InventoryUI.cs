@@ -78,6 +78,7 @@ public class InventoryUI : MonoBehaviour
     private RectTransform creatureRightPanelRoot;
     private RectTransform creatureDetailsRoot;
     private RectTransform creatureSubTabsRoot;
+    private RectTransform creatureDetailContentRoot;
     private Image creatureDetailSprite;
     private Text creatureDetailNameText;
     private Text creatureDetailTypesText;
@@ -88,6 +89,8 @@ public class InventoryUI : MonoBehaviour
     private Text creatureDetailHpText;
     private Text creatureDetailXpText;
     private Text creatureDetailBodyText;
+    private Button creatureEvolveButton;
+    private Text creatureEvolveButtonLabel;
     private Button creatureSummaryTabButton;
     private Button creatureAttacksTabButton;
     private Button creatureSoulTraitsTabButton;
@@ -1451,12 +1454,75 @@ public class InventoryUI : MonoBehaviour
         creatureDetailTypesText = EnsureDetailText(creatureDetailsRoot, "Types", 14, TextAnchor.UpperLeft, FontStyle.Normal);
         creatureDetailHpText = EnsureDetailText(creatureDetailsRoot, "HPText", 13, TextAnchor.MiddleLeft, FontStyle.Bold);
         creatureDetailXpText = EnsureDetailText(creatureDetailsRoot, "XPText", 13, TextAnchor.MiddleLeft, FontStyle.Bold);
-        creatureDetailBodyText = EnsureDetailText(creatureDetailsRoot, "BodyText", 13, TextAnchor.UpperLeft, FontStyle.Normal);
+        Transform contentTf = creatureDetailsRoot.Find("ContentRoot");
+        if (contentTf == null)
+        {
+            GameObject go = new GameObject("ContentRoot", typeof(RectTransform), typeof(CanvasRenderer));
+            go.transform.SetParent(creatureDetailsRoot, false);
+            contentTf = go.transform;
+        }
+        creatureDetailContentRoot = contentTf as RectTransform;
+
+        creatureDetailBodyText = EnsureDetailText(creatureDetailContentRoot, "BodyText", 13, TextAnchor.UpperLeft, FontStyle.Normal);
         creatureDetailBodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
         creatureDetailBodyText.verticalOverflow = VerticalWrapMode.Overflow;
 
+        creatureEvolveButton = EnsureCreatureEvolveButton(creatureDetailsRoot);
+        if (creatureEvolveButton != null)
+        {
+            Transform labelTf = creatureEvolveButton.transform.Find("Text");
+            if (labelTf != null) creatureEvolveButtonLabel = labelTf.GetComponent<Text>();
+        }
+
         EnsureCreatureDetailBars();
         EnsureCreatureDetailSubTabs();
+    }
+
+    Button EnsureCreatureEvolveButton(Transform parent)
+    {
+        Transform tf = parent.Find("EvolveButton");
+        if (tf == null)
+        {
+            GameObject go = new GameObject("EvolveButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button), typeof(LayoutElement));
+            go.transform.SetParent(parent, false);
+            tf = go.transform;
+        }
+
+        Image bg = tf.GetComponent<Image>();
+        bg.sprite = slotSprite;
+        bg.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+        bg.color = new Color(0.20f, 0.20f, 0.24f, 0.95f);
+
+        LayoutElement le = tf.GetComponent<LayoutElement>();
+        le.preferredWidth = 132f;
+        le.preferredHeight = 26f;
+
+        Button b = tf.GetComponent<Button>();
+        b.onClick.RemoveAllListeners();
+        b.onClick.AddListener(OnEvolveSelectedCreatureClicked);
+
+        Transform labelTf = tf.Find("Text");
+        if (labelTf == null)
+        {
+            GameObject go = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(tf, false);
+            labelTf = go.transform;
+        }
+
+        Text t = labelTf.GetComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.fontSize = 13;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.fontStyle = FontStyle.Bold;
+        t.color = Color.white;
+        t.text = "Evolve";
+
+        RectTransform trt = t.rectTransform;
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = Vector2.zero;
+        trt.offsetMax = Vector2.zero;
+        return b;
     }
 
     Text EnsureDetailText(RectTransform parent, string name, int fontSize, TextAnchor anchor, FontStyle style)
@@ -1670,13 +1736,14 @@ public class InventoryUI : MonoBehaviour
 
         Text t = textTf.GetComponent<Text>();
         RectTransform trt = t.rectTransform;
-        trt.anchorMin = Vector2.zero;
-        trt.anchorMax = Vector2.one;
-        trt.offsetMin = Vector2.zero;
-        trt.offsetMax = Vector2.zero;
+        trt.anchorMin = new Vector2(0.5f, 0.5f);
+        trt.anchorMax = new Vector2(0.5f, 0.5f);
+        trt.pivot = new Vector2(0.5f, 0.5f);
+        trt.anchoredPosition = Vector2.zero;
+        trt.sizeDelta = new Vector2(28f, 28f);
         t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         t.alignment = TextAnchor.MiddleCenter;
-        t.fontSize = 6;
+        t.fontSize = 18;
         t.fontStyle = FontStyle.Bold;
         t.color = Color.white;
         t.text = label;
@@ -2004,13 +2071,29 @@ public class InventoryUI : MonoBehaviour
                 creatureSubTabsRoot.anchoredPosition = new Vector2(12f, -126f);
                 creatureSubTabsRoot.sizeDelta = new Vector2(0f, 26f);
             }
+            if (creatureDetailContentRoot != null)
+            {
+                creatureDetailContentRoot.anchorMin = new Vector2(0f, 0f);
+                creatureDetailContentRoot.anchorMax = new Vector2(1f, 1f);
+                creatureDetailContentRoot.offsetMin = new Vector2(8f, 42f);
+                creatureDetailContentRoot.offsetMax = new Vector2(-8f, -158f);
+            }
             if (creatureDetailBodyText != null)
             {
                 RectTransform rt = creatureDetailBodyText.rectTransform;
                 rt.anchorMin = new Vector2(0f, 0f);
                 rt.anchorMax = new Vector2(1f, 1f);
-                rt.offsetMin = new Vector2(8f, 8f);
-                rt.offsetMax = new Vector2(-8f, -158f);
+                rt.offsetMin = new Vector2(0f, 0f);
+                rt.offsetMax = new Vector2(0f, 0f);
+            }
+            if (creatureEvolveButton != null)
+            {
+                RectTransform rt = creatureEvolveButton.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0f, 0f);
+                rt.anchorMax = new Vector2(0f, 0f);
+                rt.pivot = new Vector2(0f, 0f);
+                rt.anchoredPosition = new Vector2(8f, 8f);
+                rt.sizeDelta = new Vector2(132f, 26f);
             }
         }
 
@@ -2273,6 +2356,8 @@ public class InventoryUI : MonoBehaviour
             if (creatureDetailHpText != null) creatureDetailHpText.text = string.Empty;
             if (creatureDetailXpText != null) creatureDetailXpText.text = string.Empty;
             if (creatureDetailBodyText != null) creatureDetailBodyText.text = string.Empty;
+            if (creatureEvolveButton != null) creatureEvolveButton.interactable = false;
+            if (creatureEvolveButtonLabel != null) creatureEvolveButtonLabel.text = "Evolve";
             return;
         }
 
@@ -2314,6 +2399,21 @@ public class InventoryUI : MonoBehaviour
         if (creatureDetailBodyText != null)
         {
             creatureDetailBodyText.text = BuildCreatureDetailBody(def, instance);
+        }
+
+        bool canEvolve = IsCreatureEligibleForEvolution(instance, def);
+        if (creatureEvolveButton != null)
+        {
+            creatureEvolveButton.interactable = canEvolve;
+            Image bg = creatureEvolveButton.GetComponent<Image>();
+            if (bg != null)
+            {
+                bg.color = canEvolve ? new Color(0.33f, 0.58f, 0.28f, 0.95f) : new Color(0.25f, 0.25f, 0.25f, 0.75f);
+            }
+        }
+        if (creatureEvolveButtonLabel != null)
+        {
+            creatureEvolveButtonLabel.text = canEvolve ? "Evolve" : "Evolve (Locked)";
         }
     }
 
@@ -2378,6 +2478,125 @@ public class InventoryUI : MonoBehaviour
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    bool IsCreatureEligibleForEvolution(CreatureInstance instance, CreatureDefinition def)
+    {
+        if (instance == null || def == null) return false;
+        if (def.nextEvolution == null) return false;
+
+        int level = Mathf.Max(1, instance.level);
+        int battles = Mathf.Max(0, instance.totalBattles);
+
+        switch (def.evolutionTrigger)
+        {
+            case EvolutionTrigger.LevelThreshold:
+                return level >= Mathf.Max(1, def.evolutionLevel);
+            case EvolutionTrigger.LevelPlusCondition:
+                return level >= Mathf.Max(1, def.evolutionLevel) && battles >= Mathf.Max(0, def.evolutionBattleCount);
+            case EvolutionTrigger.SpecialItem:
+                return HasEvolutionRelic(def.evolutionItem);
+            default:
+                return false;
+        }
+    }
+
+    bool HasEvolutionRelic(EvolutionRelic relic)
+    {
+        if (relic == EvolutionRelic.None) return true;
+        if (inventory == null) return false;
+
+        string token = NormalizeItemToken(relic.ToString());
+        if (ContainsItemToken(inventory.hotbar, token)) return true;
+        if (ContainsItemToken(inventory.bag, token)) return true;
+        return false;
+    }
+
+    bool ConsumeEvolutionRelic(EvolutionRelic relic)
+    {
+        if (relic == EvolutionRelic.None) return true;
+        if (inventory == null) return false;
+
+        string token = NormalizeItemToken(relic.ToString());
+        if (TryConsumeItemToken(inventory.hotbar, token)) { inventory.NotifyChanged(); return true; }
+        if (TryConsumeItemToken(inventory.bag, token)) { inventory.NotifyChanged(); return true; }
+        return false;
+    }
+
+    bool ContainsItemToken(InventorySlot[] slots, string token)
+    {
+        if (slots == null) return false;
+        for (int i = 0; i < slots.Length; i++)
+        {
+            InventorySlot slot = slots[i];
+            if (slot == null || slot.IsEmpty() || slot.item == null) continue;
+            if (ItemMatchesToken(slot.item, token)) return true;
+        }
+        return false;
+    }
+
+    bool TryConsumeItemToken(InventorySlot[] slots, string token)
+    {
+        if (slots == null) return false;
+        for (int i = 0; i < slots.Length; i++)
+        {
+            InventorySlot slot = slots[i];
+            if (slot == null || slot.IsEmpty() || slot.item == null) continue;
+            if (!ItemMatchesToken(slot.item, token)) continue;
+            slot.count = Mathf.Max(0, slot.count - 1);
+            if (slot.count <= 0) slot.Clear();
+            return true;
+        }
+        return false;
+    }
+
+    bool ItemMatchesToken(InventoryItemData item, string token)
+    {
+        if (item == null) return false;
+        string id = NormalizeItemToken(item.itemId);
+        string name = NormalizeItemToken(item.displayName);
+        return id == token || name == token;
+    }
+
+    string NormalizeItemToken(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        StringBuilder sb = new StringBuilder(raw.Length);
+        for (int i = 0; i < raw.Length; i++)
+        {
+            char c = raw[i];
+            if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+        }
+        return sb.ToString();
+    }
+
+    void OnEvolveSelectedCreatureClicked()
+    {
+        CreatureDefinition def;
+        CreatureInstance instance = ResolveSelectedCreatureForDetails(out def);
+        if (instance == null || def == null || def.nextEvolution == null) return;
+        if (!IsCreatureEligibleForEvolution(instance, def)) return;
+
+        if (def.evolutionTrigger == EvolutionTrigger.SpecialItem && !ConsumeEvolutionRelic(def.evolutionItem))
+        {
+            return;
+        }
+
+        CreatureDefinition next = def.nextEvolution;
+        int level = Mathf.Max(1, instance.level);
+        int oldMax = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, instance.soulTraits, level));
+        int oldCurrent = Mathf.Clamp(instance.currentHP, 0, oldMax);
+        float hpRatio = oldMax > 0 ? (float)oldCurrent / oldMax : 1f;
+
+        instance.definitionID = CreatureRegistry.CanonicalizeCreatureID(next.creatureID);
+        CreatureExperienceSystem.EnsureExperienceBaseline(instance, next);
+        int newMax = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(next, instance.soulTraits, level));
+        if (oldCurrent <= 0) instance.currentHP = 0;
+        else instance.currentHP = Mathf.Clamp(Mathf.RoundToInt(newMax * hpRatio), 1, newMax);
+        CreatureInstanceFactory.RefillPP(next, instance);
+
+        if (party != null) party.NotifyPartyChanged();
+        Refresh();
     }
 
     void OnPrevCreaturePage()
