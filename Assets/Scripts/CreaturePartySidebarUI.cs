@@ -46,6 +46,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
     [Header("Interaction")]
     public Key expandAllHoldKey = Key.Q;
+    [Min(0.01f)] public float expandAllHoldDelay = 0.24f;
 
     [Header("Visuals")]
     public Sprite markerBackgroundSprite;
@@ -81,6 +82,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private bool uiDirty = true;
     private int lastRenderedCount = -1;
     private bool expandAllHeld;
+    private bool expandHoldKeyDown;
+    private float expandHoldKeyDownTime;
 
     void Awake()
     {
@@ -516,7 +519,25 @@ public class CreaturePartySidebarUI : MonoBehaviour
         if (kb != null)
         {
             KeyControl key = kb[expandAllHoldKey];
-            if (key != null) held = key.isPressed;
+            if (key != null)
+            {
+                if (key.wasPressedThisFrame)
+                {
+                    expandHoldKeyDown = true;
+                    expandHoldKeyDownTime = Time.unscaledTime;
+                }
+
+                if (key.wasReleasedThisFrame)
+                {
+                    expandHoldKeyDown = false;
+                }
+
+                if (expandHoldKeyDown && key.isPressed)
+                {
+                    float heldDuration = Time.unscaledTime - expandHoldKeyDownTime;
+                    held = heldDuration >= Mathf.Max(0.01f, expandAllHoldDelay);
+                }
+            }
         }
 
         if (held != expandAllHeld)
