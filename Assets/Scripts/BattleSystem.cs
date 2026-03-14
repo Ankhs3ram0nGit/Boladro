@@ -254,6 +254,7 @@ public class BattleSystem : MonoBehaviour
         playerHpFill = playerHpFill ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerHpBG/PlayerHpFill");
         playerXpBg = playerXpBg ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerXpBG");
         playerXpFill = playerXpFill ?? FindImage(rootTf, "UIPanel/PlayerBar/PlayerXpBG/PlayerXpFill");
+        HidePlayerXpCardBar();
 
         enemyNameText = enemyNameText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyName");
         enemyTypesText = enemyTypesText ?? FindText(rootTf, "UIPanel/EnemyBar/EnemyTypes");
@@ -594,24 +595,9 @@ public class BattleSystem : MonoBehaviour
                 enemyHpFill.fillOrigin = 0;
                 enemyHpFill.preserveAspect = false;
             }
-
-            if (playerXpBg != null)
-            {
-                playerXpBg.sprite = fill;
-                playerXpBg.type = Image.Type.Simple;
-                playerXpBg.preserveAspect = false;
-                playerXpBg.color = new Color(0f, 0f, 0f, 0.94f);
-            }
-            if (playerXpFill != null)
-            {
-                playerXpFill.sprite = fill;
-                playerXpFill.type = Image.Type.Filled;
-                playerXpFill.fillMethod = Image.FillMethod.Horizontal;
-                playerXpFill.fillOrigin = 0;
-                playerXpFill.preserveAspect = false;
-                playerXpFill.color = new Color(0.28f, 0.75f, 1f, 1f);
-            }
         }
+
+        HidePlayerXpCardBar();
     }
 
     void TryStartBattle()
@@ -2821,6 +2807,7 @@ public class BattleSystem : MonoBehaviour
     {
         SyncActivePartyCreatureFromBattleState();
         EnsureEnemyHpText();
+        HidePlayerXpCardBar();
 
         if (playerCreature != null)
         {
@@ -2830,11 +2817,6 @@ public class BattleSystem : MonoBehaviour
             if (playerHpText != null) playerHpText.text = playerCreature.currentHP + " / " + playerCreature.maxHP;
             float playerHpRatio = playerCreature.maxHP > 0 ? (float)playerCreature.currentHP / playerCreature.maxHP : 0f;
             ApplyHpFillVisual(playerHpFill, playerHpRatio);
-            if (playerXpFill != null)
-            {
-                playerXpFill.fillAmount = ComputeSwapXpRatio(playerCreature.Instance);
-                playerXpFill.color = new Color(0.28f, 0.75f, 1f, 1f);
-            }
         }
         else
         {
@@ -2843,7 +2825,6 @@ public class BattleSystem : MonoBehaviour
             if (playerTypesText != null) playerTypesText.text = "None";
             if (playerHpText != null) playerHpText.text = "-- / --";
             ApplyHpFillVisual(playerHpFill, 0f);
-            if (playerXpFill != null) playerXpFill.fillAmount = 0f;
         }
 
         if (enemyCreature != null)
@@ -2882,6 +2863,23 @@ public class BattleSystem : MonoBehaviour
         hpFill.material = null;
         hpFill.fillAmount = clamped;
         hpFill.color = ResolveHpTierColor(clamped);
+    }
+
+    void HidePlayerXpCardBar()
+    {
+        if (playerXpFill != null)
+        {
+            playerXpFill.fillAmount = 0f;
+            if (playerXpFill.gameObject.activeSelf)
+            {
+                playerXpFill.gameObject.SetActive(false);
+            }
+        }
+
+        if (playerXpBg != null && playerXpBg.gameObject.activeSelf)
+        {
+            playerXpBg.gameObject.SetActive(false);
+        }
     }
 
     Color ResolveHpTierColor(float ratio)
