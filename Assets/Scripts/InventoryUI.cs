@@ -10,11 +10,12 @@ public class InventoryUI : MonoBehaviour
     public RectTransform hotbarRoot;
     public RectTransform bagRoot;
     public RectTransform panelRoot;
-    public int slotSize = 40;
+    public int slotSize = 90;
+    public int iconSize = 75;
     public int spacing = 2;
     public Sprite slotSprite;
     public Sprite selectedSprite;
-    public Color normalColor = Color.white;
+    public Color normalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
     public Color selectedColor = new Color(1f, 1f, 0.8f, 1f);
     public int selectedHotbarIndex = 0;
 
@@ -230,7 +231,7 @@ public class InventoryUI : MonoBehaviour
         irt.anchorMin = new Vector2(0.5f, 0.5f);
         irt.anchorMax = new Vector2(0.5f, 0.5f);
         irt.pivot = new Vector2(0.5f, 0.5f);
-        irt.sizeDelta = new Vector2(slotSize * 0.75f, slotSize * 0.75f);
+        irt.sizeDelta = new Vector2(iconSize, iconSize);
 
         GameObject countObj = new GameObject("Count");
         countObj.transform.SetParent(slotObj.transform, false);
@@ -316,7 +317,7 @@ public class InventoryUI : MonoBehaviour
         draggingIcon.transform.SetAsLastSibling();
         draggingIcon.sprite = slot.icon.sprite;
         draggingIcon.color = Color.white;
-        draggingIcon.rectTransform.sizeDelta = new Vector2(slotSize * 0.75f, slotSize * 0.75f);
+        draggingIcon.rectTransform.sizeDelta = new Vector2(iconSize, iconSize);
         draggingIcon.gameObject.SetActive(true);
         UpdateDraggingIconPosition(Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero);
     }

@@ -5,10 +5,11 @@ using UnityEngine.InputSystem;
 public class InventoryHotbar : MonoBehaviour
 {
     public int slotCount = 5;
-    public int slotSize = 64;
+    public int slotSize = 90;
+    public int iconSize = 75;
     public int spacing = 6;
     public int selectedIndex = 0;
-    public Color normalColor = new Color(1f, 1f, 1f, 1f);
+    public Color normalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
     public Color selectedColor = new Color(1f, 0.9f, 0.6f, 1f);
     public Sprite slotSprite;
     public Sprite selectedSprite;
@@ -166,8 +167,15 @@ public class InventoryHotbar : MonoBehaviour
             rt.anchorMax = new Vector2(0.5f, 0.5f);
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.anchoredPosition = Vector2.zero;
-            rt.sizeDelta = new Vector2(slotSize * 0.6f, slotSize * 0.6f);
         }
+
+        RectTransform iconRt = iconImage.GetComponent<RectTransform>();
+        iconRt.anchorMin = new Vector2(0.5f, 0.5f);
+        iconRt.anchorMax = new Vector2(0.5f, 0.5f);
+        iconRt.pivot = new Vector2(0.5f, 0.5f);
+        iconRt.anchoredPosition = Vector2.zero;
+        iconRt.sizeDelta = new Vector2(iconSize, iconSize);
+
         iconImage.sprite = icon;
         iconImage.color = Color.white;
     }
