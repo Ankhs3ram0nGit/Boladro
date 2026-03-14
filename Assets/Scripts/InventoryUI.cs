@@ -440,19 +440,21 @@ public class InventoryUI : MonoBehaviour
         }
     }
 
-    Sprite CreateSlotSprite(Color32 fill, Color32 border)
+    Sprite CreateSlotSprite(Color32 border)
     {
         const int size = 16;
         Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
         tex.filterMode = FilterMode.Point;
         tex.wrapMode = TextureWrapMode.Clamp;
 
+        Color32 clear = new Color32(0, 0, 0, 0);
+
         for (int y = 0; y < size; y++)
         {
             for (int x = 0; x < size; x++)
             {
                 bool edge = x == 0 || y == 0 || x == size - 1 || y == size - 1;
-                tex.SetPixel(x, y, edge ? border : fill);
+                tex.SetPixel(x, y, edge ? border : clear);
             }
         }
 
@@ -549,8 +551,9 @@ public class InventoryUI : MonoBehaviour
 
     void EnsureSlotSprites()
     {
-        if (slotSprite == null) slotSprite = CreateSlotSprite(new Color32(42, 42, 42, 255), new Color32(150, 150, 150, 255));
-        if (selectedSprite == null) selectedSprite = CreateSlotSprite(new Color32(80, 80, 40, 255), new Color32(255, 215, 90, 255));
+        // Always use transparent-center slot sprites so the inner fill controls opacity.
+        slotSprite = CreateSlotSprite(new Color32(150, 150, 150, 255));
+        selectedSprite = CreateSlotSprite(new Color32(255, 215, 90, 255));
     }
 
 #if UNITY_EDITOR
