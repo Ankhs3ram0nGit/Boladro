@@ -11,6 +11,7 @@ public static class CreatureLevelUpSignal
 
     private const float DefaultDuration = 1.8f;
     private static readonly Dictionary<string, PulseState> ActivePulses = new Dictionary<string, PulseState>();
+    private static readonly Dictionary<string, PulseState> PendingPulses = new Dictionary<string, PulseState>();
 
     public static void Notify(CreatureInstance instance, float duration = DefaultDuration)
     {
@@ -20,10 +21,22 @@ public static class CreatureLevelUpSignal
             return;
         }
 
+        float clampedDuration = Mathf.Max(0.1f, duration);
+        if (BattleSystem.IsEngagedBattleActive)
+        {
+            PendingPulses[key] = new PulseState
+            {
+                startedAt = 0f,
+                duration = clampedDuration
+            };
+            ActivePulses.Remove(key);
+            return;
+        }
+
         ActivePulses[key] = new PulseState
         {
             startedAt = Time.unscaledTime,
-            duration = Mathf.Max(0.1f, duration)
+            duration = clampedDuration
         };
     }
 
@@ -34,6 +47,32 @@ public static class CreatureLevelUpSignal
         if (string.IsNullOrWhiteSpace(key))
         {
             return false;
+        }
+
+        if (BattleSystem.IsEngagedBattleActive)
+        {
+            if (ActivePulses.TryGetValue(key, out PulseState activeDuringBattle))
+            {
+                float elapsedDuringBattle = Mathf.Max(0f, Time.unscaledTime - activeDuringBattle.startedAt);
+                float remaining = Mathf.Max(0.1f, activeDuringBattle.duration - elapsedDuringBattle);
+                PendingPulses[key] = new PulseState
+                {
+                    startedAt = 0f,
+                    duration = remaining
+                };
+                ActivePulses.Remove(key);
+            }
+            return false;
+        }
+
+        if (PendingPulses.TryGetValue(key, out PulseState pending))
+        {
+            ActivePulses[key] = new PulseState
+            {
+                startedAt = Time.unscaledTime,
+                duration = Mathf.Max(0.1f, pending.duration)
+            };
+            PendingPulses.Remove(key);
         }
 
         if (!ActivePulses.TryGetValue(key, out PulseState pulse))
