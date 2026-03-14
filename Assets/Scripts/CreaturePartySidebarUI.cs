@@ -8,6 +8,8 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public class CreaturePartySidebarUI : MonoBehaviour
 {
+    private const string LevelUpPulseSfxAssetPath = "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNMisc_STEP-Bit Step_HY_PC-005.wav";
+
     private sealed class PartySlotView : MonoBehaviour
     {
         public int slotIndex;
@@ -78,6 +80,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
     public Color xpBarFillColor = new Color(0.30f, 0.75f, 1f, 1f);
     public Color barOutlineColor = Color.black;
     [Range(0.5f, 2f)] public float barOutlineThickness = 1f;
+    [Range(0f, 1f)] public float levelUpPulseSfxVolume = 0.9f;
+    public AudioClip levelUpPulseSfx;
 
     [Header("Face Crop")]
     [Range(0.3f, 1f)] public float faceCropWidthRatio = 0.92f;
@@ -102,6 +106,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private bool expandAllHeld;
     private bool expandHoldKeyDown;
     private float expandHoldKeyDownTime;
+    private AudioSource levelUpPulseAudioSource;
+    private readonly HashSet<string> activePulseSfxKeys = new HashSet<string>();
     private static readonly Color HpGreen = new Color(0.20f, 0.82f, 0.24f, 1f);
     private static readonly Color HpYellow = new Color(0.97f, 0.88f, 0.20f, 1f);
     private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
@@ -110,6 +116,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
     void Awake()
     {
         EnsureSprites();
+        EnsureLevelUpPulseAudio();
         EnsurePartySource();
         EnsureRoot();
         RebuildUI();
@@ -160,6 +167,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
     void OnDisable()
     {
         UnbindPartyEvents();
+        activePulseSfxKeys.Clear();
     }
 
     void OnDestroy()
@@ -280,6 +288,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private void RebuildUI()
     {
         EnsureSprites();
+        EnsureLevelUpPulseAudio();
         EnsureRoot();
         if (partySource == null || partySource.ActiveCreatures == null) return;
 
@@ -315,6 +324,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
                 ApplySlotVisual(slotObj, instance, def, i == activeIndex);
             }
 
+            activePulseSfxKeys.Clear();
             lastRenderedCount = count;
             uiDirty = false;
             return;
@@ -339,6 +349,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
             ApplySlotVisual(slotObj, instance, def, i == activeIndex);
         }
 
+        activePulseSfxKeys.Clear();
         lastRenderedCount = count;
         uiDirty = false;
     }
@@ -897,6 +908,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
                 view.levelUpArrowRect.localRotation = Quaternion.Euler(0f, 0f, 90f);
                 view.levelUpArrow.sprite = levelUpArrowSprite;
                 bool hasPulse = CreatureLevelUpSignal.TryGetPulse01(view.instance, out float pulse01);
+                SyncLevelUpPulseSfx(view.instance, hasPulse);
                 if (hasPulse)
                 {
                     float envelope = 1f - Mathf.Clamp01(pulse01);
@@ -923,6 +935,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
             }
             else
             {
+                SyncLevelUpPulseSfx(view.instance, false);
                 view.slotRect.localScale = Vector3.one;
             }
 
@@ -1038,6 +1051,49 @@ public class CreaturePartySidebarUI : MonoBehaviour
         rt.pivot = new Vector2(0.5f, 0f);
         rt.offsetMin = new Vector2(0f, bottom);
         rt.offsetMax = new Vector2(0f, bottom + height);
+    }
+
+    private void EnsureLevelUpPulseAudio()
+    {
+        if (levelUpPulseAudioSource != null) return;
+        levelUpPulseAudioSource = gameObject.AddComponent<AudioSource>();
+        levelUpPulseAudioSource.playOnAwake = false;
+        levelUpPulseAudioSource.loop = false;
+        levelUpPulseAudioSource.spatialBlend = 0f;
+    }
+
+    private void EnsureLevelUpPulseClipLoaded()
+    {
+        if (levelUpPulseSfx != null) return;
+#if UNITY_EDITOR
+        levelUpPulseSfx = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>(LevelUpPulseSfxAssetPath);
+#endif
+    }
+
+    private void SyncLevelUpPulseSfx(CreatureInstance instance, bool hasPulse)
+    {
+        string key = ResolvePulseKey(instance);
+        if (string.IsNullOrWhiteSpace(key)) return;
+
+        if (!hasPulse)
+        {
+            activePulseSfxKeys.Remove(key);
+            return;
+        }
+
+        if (!activePulseSfxKeys.Add(key)) return;
+        EnsureLevelUpPulseAudio();
+        EnsureLevelUpPulseClipLoaded();
+        if (levelUpPulseAudioSource == null || levelUpPulseSfx == null) return;
+        levelUpPulseAudioSource.PlayOneShot(levelUpPulseSfx, Mathf.Clamp01(levelUpPulseSfxVolume));
+    }
+
+    private static string ResolvePulseKey(CreatureInstance instance)
+    {
+        if (instance == null) return string.Empty;
+        if (!string.IsNullOrWhiteSpace(instance.creatureUID)) return instance.creatureUID.Trim();
+        if (!string.IsNullOrWhiteSpace(instance.definitionID)) return "def:" + instance.definitionID.Trim();
+        return string.Empty;
     }
 
     private float ComputeXpRatio(CreatureInstance instance, CreatureDefinition definition)

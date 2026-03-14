@@ -92,7 +92,7 @@ public class TreeHoverSelector : MonoBehaviour
 
     [Header("Audio")]
     public AudioClip[] pickaxeHitSfx;
-    [Range(0f, 1f)] public float pickaxeHitSfxVolume = 0.9f;
+    [Range(0f, 1f)] public float pickaxeHitSfxVolume = 0.78f;
 
     enum HarvestKind
     {
@@ -168,6 +168,11 @@ public class TreeHoverSelector : MonoBehaviour
 
     void Awake()
     {
+        if (Mathf.Abs(pickaxeHitSfxVolume - 0.9f) <= 0.0001f)
+        {
+            pickaxeHitSfxVolume = 0.78f;
+        }
+
         toolController = GetComponent<PlayerToolController>();
         inventory = GetComponent<InventoryModel>();
         BindToolController(toolController);
