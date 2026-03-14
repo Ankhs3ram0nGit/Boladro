@@ -1247,6 +1247,14 @@ public class InventoryUI : MonoBehaviour
             tabButtons[i] = button;
             tabButtonLabels[i] = label;
         }
+
+        // Cleanup any stray controls accidentally parented into tab row from previous runtime layouts.
+        Transform strayEvolve = tabsRoot.Find("EvolveButton");
+        if (strayEvolve != null)
+        {
+            if (Application.isPlaying) Destroy(strayEvolve.gameObject);
+            else DestroyImmediate(strayEvolve.gameObject);
+        }
     }
 
     void EnsureCreatureTabUI()
@@ -1722,6 +1730,12 @@ public class InventoryUI : MonoBehaviour
         le.preferredWidth = 6f;
         le.preferredHeight = 4f;
 
+        RectTransform btnRt = existing as RectTransform;
+        if (btnRt != null)
+        {
+            btnRt.sizeDelta = new Vector2(6f, 4f);
+        }
+
         Button b = existing.GetComponent<Button>();
         b.onClick.RemoveAllListeners();
         b.onClick.AddListener(onClick);
@@ -1975,10 +1989,10 @@ public class InventoryUI : MonoBehaviour
 
         if (creatureDetailsRoot != null && creatureRightPanelRoot != null)
         {
-            creatureDetailsRoot.anchorMin = new Vector2(0f, 1f);
+            creatureDetailsRoot.anchorMin = new Vector2(0f, 0f);
             creatureDetailsRoot.anchorMax = new Vector2(1f, 1f);
             creatureDetailsRoot.pivot = new Vector2(0f, 1f);
-            creatureDetailsRoot.anchoredPosition = new Vector2(10f, -10f);
+            creatureDetailsRoot.anchoredPosition = Vector2.zero;
             creatureDetailsRoot.sizeDelta = new Vector2(-20f, -20f);
 
             if (creatureDetailSprite != null)
@@ -2094,6 +2108,7 @@ public class InventoryUI : MonoBehaviour
                 rt.pivot = new Vector2(0f, 0f);
                 rt.anchoredPosition = new Vector2(8f, 8f);
                 rt.sizeDelta = new Vector2(132f, 26f);
+                rt.SetAsLastSibling();
             }
         }
 
