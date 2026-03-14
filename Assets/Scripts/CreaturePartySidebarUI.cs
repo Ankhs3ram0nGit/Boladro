@@ -28,9 +28,9 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
     [Header("Layout")]
     public Vector2 anchoredPosition = new Vector2(16f, -120f);
-    public Vector2 inactiveSlotSize = new Vector2(72f, 72f);
+    public Vector2 inactiveSlotSize = new Vector2(230f, 84f);
     public Vector2 activeSlotSize = new Vector2(230f, 84f);
-    public Vector2 inactiveIconSize = new Vector2(52f, 52f);
+    public Vector2 inactiveIconSize = new Vector2(60f, 60f);
     public Vector2 activeIconSize = new Vector2(60f, 60f);
     public float spacing = 6f;
 
@@ -448,52 +448,46 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.icon.enabled = view.icon.sprite != null;
         view.iconRect.sizeDelta = iconDims;
 
-        if (isActive)
+        view.iconRect.anchorMin = new Vector2(0f, 0.5f);
+        view.iconRect.anchorMax = new Vector2(0f, 0.5f);
+        view.iconRect.pivot = new Vector2(0.5f, 0.5f);
+        view.iconRect.anchoredPosition = new Vector2(10f + iconDims.x * 0.5f, 0f);
+
+        view.infoRoot.gameObject.SetActive(true);
+        view.infoRoot.anchorMin = new Vector2(0f, 0f);
+        view.infoRoot.anchorMax = new Vector2(1f, 1f);
+        view.infoRoot.pivot = new Vector2(0.5f, 0.5f);
+        view.infoRoot.offsetMin = new Vector2(iconDims.x + 18f, 8f);
+        view.infoRoot.offsetMax = new Vector2(-10f, -8f);
+
+        LayoutText(view.nameText.rectTransform, new Vector2(0f, 0.72f), new Vector2(0.75f, 1f));
+        LayoutText(view.levelText.rectTransform, new Vector2(0.75f, 0.72f), new Vector2(1f, 1f));
+        LayoutText(view.hpText.rectTransform, new Vector2(0.55f, 0.28f), new Vector2(1f, 0.42f));
+
+        string displayName = instance != null ? instance.DisplayName : (def != null ? def.displayName : "Creature");
+        int level = instance != null ? Mathf.Max(1, instance.level) : 1;
+        int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, instance != null ? instance.soulTraits : default, level));
+        int curHp = instance != null ? Mathf.Clamp(instance.currentHP, 0, maxHp) : maxHp;
+
+        view.nameText.text = string.IsNullOrWhiteSpace(displayName) ? "Creature" : displayName;
+        view.levelText.text = "Lv " + level;
+        view.hpText.text = curHp + "/" + maxHp;
+
+        view.hpFill.fillAmount = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
+        view.xpFill.fillAmount = ComputeXpRatio(instance);
+
+        view.glass.enabled = !isActive;
+        view.glassOutline.enabled = !isActive;
+        if (!isActive)
         {
-            view.iconRect.anchorMin = new Vector2(0f, 0.5f);
-            view.iconRect.anchorMax = new Vector2(0f, 0.5f);
-            view.iconRect.pivot = new Vector2(0.5f, 0.5f);
-            view.iconRect.anchoredPosition = new Vector2(10f + iconDims.x * 0.5f, 0f);
-
-            view.infoRoot.gameObject.SetActive(true);
-            view.infoRoot.anchorMin = new Vector2(0f, 0f);
-            view.infoRoot.anchorMax = new Vector2(1f, 1f);
-            view.infoRoot.pivot = new Vector2(0.5f, 0.5f);
-            view.infoRoot.offsetMin = new Vector2(iconDims.x + 18f, 8f);
-            view.infoRoot.offsetMax = new Vector2(-10f, -8f);
-
-            LayoutText(view.nameText.rectTransform, new Vector2(0f, 0.72f), new Vector2(0.75f, 1f));
-            LayoutText(view.levelText.rectTransform, new Vector2(0.75f, 0.72f), new Vector2(1f, 1f));
-            LayoutText(view.hpText.rectTransform, new Vector2(0.55f, 0.28f), new Vector2(1f, 0.42f));
-
-            string displayName = instance != null ? instance.DisplayName : (def != null ? def.displayName : "Creature");
-            int level = instance != null ? Mathf.Max(1, instance.level) : 1;
-            int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, instance != null ? instance.soulTraits : default, level));
-            int curHp = instance != null ? Mathf.Clamp(instance.currentHP, 0, maxHp) : maxHp;
-
-            view.nameText.text = string.IsNullOrWhiteSpace(displayName) ? "Creature" : displayName;
-            view.levelText.text = "Lv " + level;
-            view.hpText.text = curHp + "/" + maxHp;
-
-            view.hpFill.fillAmount = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
-            view.xpFill.fillAmount = ComputeXpRatio(instance);
+            view.glass.sprite = glassOverlaySprite;
+            view.glass.type = glassOverlaySprite != null && glassOverlaySprite.border.sqrMagnitude > 0f
+                ? Image.Type.Sliced
+                : Image.Type.Simple;
+            view.glass.color = glassColor;
+            view.glassOutline.effectColor = glassOutlineColor;
+            view.glassOutline.effectDistance = new Vector2(glassOutlineThickness, glassOutlineThickness);
         }
-        else
-        {
-            view.iconRect.anchorMin = new Vector2(0.5f, 0.5f);
-            view.iconRect.anchorMax = new Vector2(0.5f, 0.5f);
-            view.iconRect.pivot = new Vector2(0.5f, 0.5f);
-            view.iconRect.anchoredPosition = Vector2.zero;
-            view.infoRoot.gameObject.SetActive(false);
-        }
-
-        view.glass.sprite = glassOverlaySprite;
-        view.glass.type = glassOverlaySprite != null && glassOverlaySprite.border.sqrMagnitude > 0f
-            ? Image.Type.Sliced
-            : Image.Type.Simple;
-        view.glass.color = glassColor;
-        view.glassOutline.effectColor = glassOutlineColor;
-        view.glassOutline.effectDistance = new Vector2(glassOutlineThickness, glassOutlineThickness);
     }
 
     private void LayoutText(RectTransform rt, Vector2 anchorMin, Vector2 anchorMax)
