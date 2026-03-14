@@ -92,6 +92,11 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private readonly List<Sprite> generatedHeadSprites = new List<Sprite>();
     private Sprite neutralFillSprite;
     private InventoryUI inventoryUI;
+    private RectTransform addPartyDropRect;
+    private Image addPartyDropBg;
+    private Text addPartyDropPlus;
+    private Text addPartyDropLabel;
+    private AddPartyDropZoneUI addPartyDropZone;
     private bool uiDirty = true;
     private int lastRenderedCount = -1;
     private bool expandAllHeld;
@@ -138,10 +143,14 @@ public class CreaturePartySidebarUI : MonoBehaviour
             desiredCount = Mathf.Min(maxVisibleSlots, partySource.ActiveCreatures.Count);
         }
 
-        bool hierarchyMismatch = listRoot != null && listRoot.childCount != desiredCount;
+        bool hierarchyMismatch = builtSlots.Count != desiredCount;
         if (uiDirty || lastRenderedCount != desiredCount || hierarchyMismatch)
         {
             RebuildUI();
+        }
+        else
+        {
+            RefreshAddPartyDropZone();
         }
 
         RefreshLiveSlotData();
@@ -259,9 +268,13 @@ public class CreaturePartySidebarUI : MonoBehaviour
             for (int i = 0; i < listRoot.childCount; i++)
             {
                 Transform child = listRoot.GetChild(i);
-                if (child != null) builtSlots.Add(child.gameObject);
+                if (child == null) continue;
+                if (child.GetComponent<PartySlotView>() == null) continue;
+                builtSlots.Add(child.gameObject);
             }
         }
+
+        EnsureAddPartyDropZone();
     }
 
     private void RebuildUI()
@@ -345,6 +358,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
                 }
             }
         }
+
+        RefreshAddPartyDropZone();
     }
 
     private GameObject BuildSlot(int index)
@@ -449,6 +464,111 @@ public class CreaturePartySidebarUI : MonoBehaviour
         dragView.iconSource = view.icon;
 
         return slot;
+    }
+
+    private void EnsureAddPartyDropZone()
+    {
+        if (listRoot == null) return;
+
+        Transform existing = listRoot.Find("AddPartyDropZone");
+        if (existing == null)
+        {
+            GameObject go = new GameObject("AddPartyDropZone",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(LayoutElement),
+                typeof(AddPartyDropZoneUI));
+            go.transform.SetParent(listRoot, false);
+            existing = go.transform;
+        }
+
+        addPartyDropRect = existing as RectTransform;
+        addPartyDropBg = existing.GetComponent<Image>();
+        if (addPartyDropBg != null)
+        {
+            addPartyDropBg.color = new Color(0f, 0f, 0f, 0.35f);
+            addPartyDropBg.raycastTarget = true;
+        }
+
+        LayoutElement le = existing.GetComponent<LayoutElement>();
+        if (le != null)
+        {
+            le.preferredWidth = expandedSlotSize.x;
+            le.preferredHeight = Mathf.Max(64f, collapsedSlotSize.y);
+            le.minWidth = le.preferredWidth;
+            le.minHeight = le.preferredHeight;
+        }
+
+        Transform plusTf = existing.Find("Plus");
+        if (plusTf == null)
+        {
+            GameObject go = new GameObject("Plus", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(existing, false);
+            plusTf = go.transform;
+        }
+
+        addPartyDropPlus = plusTf.GetComponent<Text>();
+        addPartyDropPlus.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        addPartyDropPlus.fontStyle = FontStyle.Bold;
+        addPartyDropPlus.fontSize = 46;
+        addPartyDropPlus.alignment = TextAnchor.MiddleLeft;
+        addPartyDropPlus.color = new Color(0.88f, 0.88f, 0.88f, 1f);
+        addPartyDropPlus.text = "+";
+        RectTransform plusRt = addPartyDropPlus.rectTransform;
+        plusRt.anchorMin = new Vector2(0f, 0f);
+        plusRt.anchorMax = new Vector2(0f, 1f);
+        plusRt.pivot = new Vector2(0f, 0.5f);
+        plusRt.anchoredPosition = new Vector2(10f, 0f);
+        plusRt.sizeDelta = new Vector2(44f, 0f);
+
+        Transform labelTf = existing.Find("Label");
+        if (labelTf == null)
+        {
+            GameObject go = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
+            go.transform.SetParent(existing, false);
+            labelTf = go.transform;
+        }
+
+        addPartyDropLabel = labelTf.GetComponent<Text>();
+        addPartyDropLabel.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        addPartyDropLabel.fontStyle = FontStyle.Bold;
+        addPartyDropLabel.fontSize = 26;
+        addPartyDropLabel.alignment = TextAnchor.MiddleLeft;
+        addPartyDropLabel.color = new Color(0.86f, 0.86f, 0.86f, 1f);
+        addPartyDropLabel.text = "Add to Party";
+        RectTransform labelRt = addPartyDropLabel.rectTransform;
+        labelRt.anchorMin = new Vector2(0f, 0f);
+        labelRt.anchorMax = new Vector2(1f, 1f);
+        labelRt.pivot = new Vector2(0f, 0.5f);
+        labelRt.offsetMin = new Vector2(58f, 0f);
+        labelRt.offsetMax = new Vector2(-10f, 0f);
+
+        addPartyDropZone = existing.GetComponent<AddPartyDropZoneUI>();
+        if (addPartyDropZone != null)
+        {
+            addPartyDropZone.sidebar = this;
+        }
+    }
+
+    private void RefreshAddPartyDropZone()
+    {
+        EnsureAddPartyDropZone();
+        if (addPartyDropRect == null) return;
+
+        bool canShow = CanAcceptPartyAddDrop();
+        if (addPartyDropRect.gameObject.activeSelf != canShow)
+        {
+            addPartyDropRect.gameObject.SetActive(canShow);
+        }
+
+        if (!canShow) return;
+
+        addPartyDropRect.SetSiblingIndex(builtSlots.Count);
+        if (addPartyDropZone != null) addPartyDropZone.sidebar = this;
+        if (addPartyDropBg != null) addPartyDropBg.color = new Color(0f, 0f, 0f, 0.35f);
+        if (addPartyDropLabel != null) addPartyDropLabel.color = new Color(0.86f, 0.86f, 0.86f, 1f);
+        if (addPartyDropPlus != null) addPartyDropPlus.color = new Color(0.90f, 0.90f, 0.90f, 1f);
     }
 
     private Text CreateOutlinedText(string name, RectTransform parent, int fontSize, TextAnchor alignment, Color color)
@@ -880,6 +1000,21 @@ public class CreaturePartySidebarUI : MonoBehaviour
         inventoryUI.EndCreatureDrag();
     }
 
+    public bool CanAcceptPartyAddDrop()
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return false;
+        if (!inventoryUI.IsCreaturesTabOpen) return false;
+        return inventoryUI.CanAddCreatureToParty();
+    }
+
+    public void DropDraggedCreatureIntoParty()
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return;
+        inventoryUI.DropCreatureIntoNewPartySlot();
+    }
+
     private void LayoutInfoBars(PartySlotView view)
     {
         if (view == null || view.hpBarRect == null || view.xpBarRect == null || view.infoRoot == null) return;
@@ -1050,8 +1185,28 @@ public sealed class PartySidebarSlotDragUI : MonoBehaviour, IPointerDownHandler,
                 sidebar.DropDraggedCreatureOnSidebarSlot(partyTarget.slotIndex);
                 return;
             }
+
+            AddPartyDropZoneUI addZone = go.GetComponentInParent<AddPartyDropZoneUI>();
+            if (addZone != null)
+            {
+                sidebar.DropDraggedCreatureIntoParty();
+                return;
+            }
         }
 
         sidebar.EndCreatureDrag();
+    }
+}
+
+public sealed class AddPartyDropZoneUI : MonoBehaviour, IDropHandler
+{
+    public CreaturePartySidebarUI sidebar;
+
+    public void OnDrop(PointerEventData eventData)
+    {
+        if (sidebar == null) return;
+        if (!sidebar.CanAcceptPartyAddDrop()) return;
+        if (!sidebar.HasActiveCreatureDrag()) return;
+        sidebar.DropDraggedCreatureIntoParty();
     }
 }

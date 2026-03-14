@@ -821,6 +821,12 @@ public class InventoryUI : MonoBehaviour
         return dragMode == DragMode.CreatureStorage || dragMode == DragMode.CreatureParty;
     }
 
+    public bool CanAddCreatureToParty()
+    {
+        EnsureCreatureSources();
+        return party != null && party.HasSpaceInParty();
+    }
+
     public void BeginCreatureDragFromStorage(CreatureStorageSlotUI slot)
     {
         if (slot == null) return;
@@ -1050,6 +1056,26 @@ public class InventoryUI : MonoBehaviour
 
         EndCreatureDrag();
         RefreshCreatureTab();
+    }
+
+    public void DropCreatureIntoNewPartySlot()
+    {
+        if (!HasActiveCreatureDrag()) return;
+        EnsureCreatureSources();
+        if (party == null)
+        {
+            EndCreatureDrag();
+            return;
+        }
+
+        int nextSlot = party.FindFirstEmptyPartySlotIndex();
+        if (nextSlot < 0 || nextSlot >= PlayerCreatureParty.MaxPartySize)
+        {
+            EndCreatureDrag();
+            return;
+        }
+
+        DropCreatureOnPartySlot(nextSlot);
     }
 
     public void EndCreatureDrag()
@@ -1544,8 +1570,8 @@ public class InventoryUI : MonoBehaviour
         bg.color = new Color(0.20f, 0.20f, 0.24f, 0.95f);
 
         LayoutElement le = tf.GetComponent<LayoutElement>();
-        le.preferredWidth = name == "SoulTraitsTab" ? 102f : 84f;
-        le.preferredHeight = 24f;
+        le.preferredWidth = name == "SoulTraitsTab" ? 88f : 72f;
+        le.preferredHeight = 20f;
 
         RectTransform rt = tf as RectTransform;
         if (rt != null) rt.sizeDelta = new Vector2(le.preferredWidth, le.preferredHeight);
@@ -1627,8 +1653,8 @@ public class InventoryUI : MonoBehaviour
         bg.color = new Color(0.22f, 0.22f, 0.22f, 0.9f);
 
         LayoutElement le = existing.GetComponent<LayoutElement>();
-        le.preferredWidth = 56f;
-        le.preferredHeight = 34f;
+        le.preferredWidth = 6f;
+        le.preferredHeight = 4f;
 
         Button b = existing.GetComponent<Button>();
         b.onClick.RemoveAllListeners();
@@ -1650,7 +1676,7 @@ public class InventoryUI : MonoBehaviour
         trt.offsetMax = Vector2.zero;
         t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         t.alignment = TextAnchor.MiddleCenter;
-        t.fontSize = 18;
+        t.fontSize = 6;
         t.fontStyle = FontStyle.Bold;
         t.color = Color.white;
         t.text = label;
@@ -1975,7 +2001,7 @@ public class InventoryUI : MonoBehaviour
                 creatureSubTabsRoot.anchorMin = new Vector2(0f, 1f);
                 creatureSubTabsRoot.anchorMax = new Vector2(1f, 1f);
                 creatureSubTabsRoot.pivot = new Vector2(0f, 1f);
-                creatureSubTabsRoot.anchoredPosition = new Vector2(0f, -126f);
+                creatureSubTabsRoot.anchoredPosition = new Vector2(12f, -126f);
                 creatureSubTabsRoot.sizeDelta = new Vector2(0f, 26f);
             }
             if (creatureDetailBodyText != null)
@@ -1983,8 +2009,8 @@ public class InventoryUI : MonoBehaviour
                 RectTransform rt = creatureDetailBodyText.rectTransform;
                 rt.anchorMin = new Vector2(0f, 0f);
                 rt.anchorMax = new Vector2(1f, 1f);
-                rt.offsetMin = new Vector2(2f, 2f);
-                rt.offsetMax = new Vector2(-2f, -158f);
+                rt.offsetMin = new Vector2(8f, 8f);
+                rt.offsetMax = new Vector2(-8f, -158f);
             }
         }
 
@@ -2547,6 +2573,13 @@ public class CreatureStorageSlotUI : MonoBehaviour, IPointerDownHandler, IBeginD
             if (partyTarget != null)
             {
                 ui.DropCreatureOnPartySlot(partyTarget.slotIndex);
+                return;
+            }
+
+            AddPartyDropZoneUI addZone = go.GetComponentInParent<AddPartyDropZoneUI>();
+            if (addZone != null)
+            {
+                ui.DropCreatureIntoNewPartySlot();
                 return;
             }
         }
