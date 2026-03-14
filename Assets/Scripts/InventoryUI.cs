@@ -9,8 +9,9 @@ public class InventoryUI : MonoBehaviour
     const int MinRecommendedSlotSize = 90;
     const int DefaultRecommendedIconSize = 80;
     const float IconDisplayScale = 0.9f;
+    const float SlotFillOpacity = 0.35f;
     static readonly Color DefaultSlotNormalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
-    static readonly Color DefaultEmptySlotFillColor = new Color(0f, 0f, 0f, 0.45f);
+    static readonly Color DefaultEmptySlotFillColor = new Color(0f, 0f, 0f, SlotFillOpacity);
 
     public InventoryModel inventory;
     public RectTransform hotbarRoot;
@@ -25,7 +26,7 @@ public class InventoryUI : MonoBehaviour
     public Sprite selectedSprite;
     public Color normalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
     public Color selectedColor = new Color(1f, 1f, 0.8f, 1f);
-    public Color emptySlotFillColor = new Color(0f, 0f, 0f, 0.45f);
+    public Color emptySlotFillColor = new Color(0f, 0f, 0f, SlotFillOpacity);
     public int slotInnerPadding = 6;
     public int selectedHotbarIndex = 0;
 
@@ -536,7 +537,8 @@ public class InventoryUI : MonoBehaviour
         if (spacing < 0) spacing = 0;
         if (inventoryMenuSlotSpacing < 0) inventoryMenuSlotSpacing = 0;
         if (slotInnerPadding < 0) slotInnerPadding = 0;
-        if (emptySlotFillColor.a <= 0f) emptySlotFillColor = DefaultEmptySlotFillColor;
+        // Keep slot interior consistently black at the requested opacity.
+        emptySlotFillColor = DefaultEmptySlotFillColor;
         EnsureSlotSprites();
     }
 
