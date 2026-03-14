@@ -42,6 +42,13 @@ public class PlayerHealth : MonoBehaviour
         cameraFollow = FindAnyObjectByType<CameraFollow2D>();
         if (followerToTeleport == null)
         {
+            if (ActivePartyFollowerController.Instance != null && ActivePartyFollowerController.Instance.CurrentFollowerTransform != null)
+            {
+                followerToTeleport = ActivePartyFollowerController.Instance.CurrentFollowerTransform;
+            }
+        }
+        if (followerToTeleport == null)
+        {
             GameObject frog = GameObject.Find("Frog");
             if (frog != null) followerToTeleport = frog.transform;
         }
@@ -113,6 +120,11 @@ public class PlayerHealth : MonoBehaviour
 
         if (followerToTeleport != null)
         {
+            followerToTeleport.position = transform.position + followerRespawnOffset;
+        }
+        else if (ActivePartyFollowerController.Instance != null && ActivePartyFollowerController.Instance.CurrentFollowerTransform != null)
+        {
+            followerToTeleport = ActivePartyFollowerController.Instance.CurrentFollowerTransform;
             followerToTeleport.position = transform.position + followerRespawnOffset;
         }
 

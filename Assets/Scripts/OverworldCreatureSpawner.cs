@@ -937,6 +937,13 @@ public class OverworldCreatureSpawner : MonoBehaviour
             return Mathf.Max(0.05f, fallbackSpawnScaleBaseline);
         }
 
+        if (ActivePartyFollowerController.Instance != null &&
+            ActivePartyFollowerController.Instance.CurrentFollowerTransform != null)
+        {
+            float followerScale = Mathf.Abs(ActivePartyFollowerController.Instance.CurrentFollowerTransform.localScale.x);
+            if (followerScale >= 0.01f) return followerScale;
+        }
+
         if (frogScaleReference == null)
         {
             GameObject frog = GameObject.Find("Frog");

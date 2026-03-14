@@ -429,8 +429,13 @@ public class CreaturePartySidebarUI : MonoBehaviour
         PartySlotView view = slotObj.GetComponent<PartySlotView>();
         if (view == null) return;
 
-        Vector2 slotDims = isActive ? activeSlotSize : inactiveSlotSize;
-        Vector2 iconDims = isActive ? activeIconSize : inactiveIconSize;
+        // Force all cards to use expanded dimensions (scene-serialized inactive values may still be old).
+        Vector2 slotDims = new Vector2(
+            Mathf.Max(activeSlotSize.x, inactiveSlotSize.x),
+            Mathf.Max(activeSlotSize.y, inactiveSlotSize.y));
+        Vector2 iconDims = new Vector2(
+            Mathf.Max(activeIconSize.x, inactiveIconSize.x),
+            Mathf.Max(activeIconSize.y, inactiveIconSize.y));
 
         view.slotRect.sizeDelta = slotDims;
         view.layout.preferredWidth = slotDims.x;

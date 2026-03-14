@@ -813,6 +813,15 @@ public class BattleSystem : MonoBehaviour
     {
         if (IsValidCombatant(playerCreature)) return playerCreature;
 
+        if (ActivePartyFollowerController.Instance != null)
+        {
+            CreatureCombatant activeFollowerCombatant = ActivePartyFollowerController.Instance.CurrentFollowerCombatant;
+            if (IsValidCombatant(activeFollowerCombatant))
+            {
+                return activeFollowerCombatant;
+            }
+        }
+
         GameObject frog = GameObject.Find("Frog");
         if (frog != null)
         {
