@@ -75,6 +75,20 @@ public class BattleSystem : MonoBehaviour
     [Min(0.1f)] public float eliteBattleXpMultiplier = 1.30f;
     [Min(0.1f)] public float legendaryBattleXpMultiplier = 1.55f;
 
+    [Header("Damage Scaling")]
+    [Tooltip("Move damage is converted to attack power with: moveDamage * (attack / this value).")]
+    [Min(0.1f)] public float damageAttackStatDivisor = 10f;
+    [Tooltip("High-attack branch multiplier used when attack power >= defense.")]
+    [Min(0.1f)] public float damageHighAttackBranchMultiplier = 2f;
+    [Tooltip("Level ratio exponent used in level-gap scaling. 2 = quadratic.")]
+    [Min(0.1f)] public float damageLevelRatioExponent = 2f;
+    [Tooltip("Minimum level-gap multiplier clamp.")]
+    [Min(0.01f)] public float damageLevelMultiplierMin = 0.10f;
+    [Tooltip("Maximum level-gap multiplier clamp.")]
+    [Min(0.1f)] public float damageLevelMultiplierMax = 4.0f;
+    [Tooltip("Final minimum damage after all scaling.")]
+    [Min(1)] public int minimumDamagePerHit = 1;
+
     private PlayerMover playerMover;
     private PlayerHealth playerHealth;
     private WildCreatureAI currentEnemyAI;
@@ -2352,8 +2366,16 @@ public class BattleSystem : MonoBehaviour
 
     bool DecideTurnOrder()
     {
-        if (playerCreature.speed > enemyCreature.speed) return true;
-        if (playerCreature.speed < enemyCreature.speed) return false;
+        CreatureStats playerStats = playerCreature != null ? playerCreature.GetFinalStats() : default;
+        CreatureStats enemyStats = enemyCreature != null ? enemyCreature.GetFinalStats() : default;
+        int playerSpd = Mathf.Max(1, playerStats.speed);
+        int enemySpd = Mathf.Max(1, enemyStats.speed);
+
+        if (playerCreature != null) playerCreature.speed = playerSpd;
+        if (enemyCreature != null) enemyCreature.speed = enemySpd;
+
+        if (playerSpd > enemySpd) return true;
+        if (playerSpd < enemySpd) return false;
         return Random.value > 0.5f;
     }
 
@@ -2460,19 +2482,45 @@ public class BattleSystem : MonoBehaviour
 
     int CalculateDamage(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk, bool isCrit, float typeMultiplier)
     {
-        int dmg = isCrit ? atk.critDamage : atk.baseDamage;
-        if (dmg <= 0) return 0;
+        int moveDamage = isCrit ? atk.critDamage : atk.baseDamage;
+        if (moveDamage <= 0) return 0;
 
         CreatureStats attackerStats = attacker != null ? attacker.GetFinalStats() : default;
         CreatureStats defenderStats = defender != null ? defender.GetFinalStats() : default;
-        float attackVsDefense = Mathf.Max(0.4f, attackerStats.attack / Mathf.Max(1f, defenderStats.defense));
 
-        float multiplier = Mathf.Max(0f, typeMultiplier);
+        float attackerAttack = Mathf.Max(1f, attackerStats.attack);
+        float defenderDefense = Mathf.Max(1f, defenderStats.defense);
+        float attackDivisor = Mathf.Max(0.1f, damageAttackStatDivisor);
 
-        if (attacker.HasStatus(StatusEffectType.Burn) && atk.isPhysical)
+        // Step 1: Convert move coefficient into stat-weighted attack power.
+        float attackPower = moveDamage * (attackerAttack / attackDivisor);
+
+        // Step 2: Piecewise stat-vs-defense reduction.
+        float rawDamage;
+        if (attackPower >= defenderDefense)
         {
-            multiplier *= 0.5f;
+            float branchMultiplier = Mathf.Max(0.1f, damageHighAttackBranchMultiplier);
+            rawDamage = attackPower * branchMultiplier * attackPower / Mathf.Max(1f, attackPower + defenderDefense);
         }
+        else
+        {
+            rawDamage = (attackPower * attackPower) / Mathf.Max(1f, defenderDefense);
+        }
+
+        // Step 3: Quadratic-style level gap scaling (tunable exponent and clamps).
+        int attackerLevel = attacker != null ? Mathf.Max(1, attacker.level) : 1;
+        int defenderLevel = defender != null ? Mathf.Max(1, defender.level) : 1;
+        float levelRatio = attackerLevel / Mathf.Max(1f, defenderLevel);
+        float levelExponent = Mathf.Max(0.1f, damageLevelRatioExponent);
+        float levelMultiplier = Mathf.Pow(levelRatio, levelExponent);
+        float levelMin = Mathf.Max(0.01f, damageLevelMultiplierMin);
+        float levelMax = Mathf.Max(levelMin, damageLevelMultiplierMax);
+        levelMultiplier = Mathf.Clamp(levelMultiplier, levelMin, levelMax);
+
+        float scaledDamage = rawDamage * levelMultiplier;
+
+        // Step 4+: Type + move-specific + status modifiers.
+        float multiplier = Mathf.Max(0f, typeMultiplier);
 
         if (atk.specialFlag == MoveFlag.DoubleDamageIfStatused && defender != null && defender.statusEffects != null && defender.statusEffects.Count > 0)
         {
@@ -2492,9 +2540,13 @@ public class BattleSystem : MonoBehaviour
             }
         }
 
-        int finalDmg = Mathf.FloorToInt(dmg * attackVsDefense * multiplier);
-        if (finalDmg < 1) finalDmg = 1;
-        return finalDmg;
+        if (attacker != null && attacker.HasStatus(StatusEffectType.Burn) && atk.isPhysical)
+        {
+            multiplier *= 0.5f;
+        }
+
+        int finalDmg = Mathf.FloorToInt(scaledDamage * multiplier);
+        return Mathf.Max(Mathf.Max(1, minimumDamagePerHit), finalDmg);
     }
 
     float EvaluateTypeMultiplier(CreatureType attackType, CreatureCombatant defender)

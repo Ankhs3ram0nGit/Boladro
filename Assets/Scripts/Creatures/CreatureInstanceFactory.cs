@@ -150,8 +150,10 @@ public static class CreatureInstanceFactory
     {
         if (def == null || def.soulTraitGrowthProfile == null) return 0f;
 
-        float primary = (soulTraits.Get(primaryTrait) / 31f) * level * def.soulTraitGrowthProfile.GetGrowthFor(primaryTrait);
-        float soulDepth = (soulTraits.Get(SoulTraitType.SoulDepth) / 31f) * level * def.soulTraitGrowthProfile.GetGrowthFor(SoulTraitType.SoulDepth);
+        int clampedPrimary = Mathf.Clamp(soulTraits.Get(primaryTrait), 1, 31);
+        int clampedSoulDepth = Mathf.Clamp(soulTraits.Get(SoulTraitType.SoulDepth), 1, 31);
+        float primary = (clampedPrimary / 31f) * level * def.soulTraitGrowthProfile.GetGrowthFor(primaryTrait);
+        float soulDepth = (clampedSoulDepth / 31f) * level * def.soulTraitGrowthProfile.GetGrowthFor(SoulTraitType.SoulDepth);
         return primary + soulDepth;
     }
 }
