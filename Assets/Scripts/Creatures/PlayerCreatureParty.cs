@@ -80,6 +80,119 @@ public class PlayerCreatureParty : MonoBehaviour
         PartyChanged?.Invoke();
     }
 
+    public bool HasAnyAliveCreatures()
+    {
+        for (int i = 0; i < activeCreatures.Count; i++)
+        {
+            CreatureInstance c = activeCreatures[i];
+            if (c != null && c.currentHP > 0) return true;
+        }
+        return false;
+    }
+
+    public int FindFirstAlivePartyIndex()
+    {
+        for (int i = 0; i < activeCreatures.Count; i++)
+        {
+            CreatureInstance c = activeCreatures[i];
+            if (c != null && c.currentHP > 0) return i;
+        }
+        return -1;
+    }
+
+    public int FindNextAlivePartyIndex(int startExclusive)
+    {
+        int count = activeCreatures.Count;
+        if (count <= 0) return -1;
+
+        int start = Mathf.Clamp(startExclusive, 0, count - 1);
+        for (int step = 1; step <= count; step++)
+        {
+            int idx = (start + step) % count;
+            CreatureInstance c = activeCreatures[idx];
+            if (c != null && c.currentHP > 0) return idx;
+        }
+
+        return -1;
+    }
+
+    public bool TrySetActiveToFirstAlive()
+    {
+        int idx = FindFirstAlivePartyIndex();
+        if (idx < 0) return false;
+        SetActivePartyIndex(idx);
+        return true;
+    }
+
+    public bool TrySetActiveToNextAlive()
+    {
+        if (activeCreatures.Count <= 0) return false;
+        int idx = FindNextAlivePartyIndex(ActivePartyIndex);
+        if (idx < 0) return false;
+        SetActivePartyIndex(idx);
+        return true;
+    }
+
+    public void ReviveAllCreaturesToFull()
+    {
+        if (activeCreatures == null || activeCreatures.Count == 0) return;
+
+        bool changed = false;
+        for (int i = 0; i < activeCreatures.Count; i++)
+        {
+            CreatureInstance inst = activeCreatures[i];
+            if (inst == null) continue;
+
+            CreatureDefinition def = CreatureRegistry.Get(inst.definitionID);
+            if (def == null) continue;
+
+            int level = Mathf.Max(1, inst.level);
+            int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, inst.soulTraits, level));
+            if (inst.currentHP != maxHp)
+            {
+                inst.currentHP = maxHp;
+                changed = true;
+            }
+
+            int[] previousPp = inst.currentPP != null ? (int[])inst.currentPP.Clone() : null;
+            CreatureInstanceFactory.RefillPP(def, inst);
+            if (previousPp == null || inst.currentPP == null || inst.currentPP.Length != previousPp.Length)
+            {
+                changed = true;
+            }
+            else
+            {
+                for (int pp = 0; pp < inst.currentPP.Length; pp++)
+                {
+                    if (inst.currentPP[pp] != previousPp[pp])
+                    {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (activeCreatures.Count > 0)
+        {
+            activePartyIndex = Mathf.Clamp(activePartyIndex, 0, activeCreatures.Count - 1);
+            if (activeCreatures[activePartyIndex] == null || activeCreatures[activePartyIndex].currentHP <= 0)
+            {
+                int firstAlive = FindFirstAlivePartyIndex();
+                if (firstAlive >= 0 && firstAlive != activePartyIndex)
+                {
+                    activePartyIndex = firstAlive;
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed)
+        {
+            PartyChanged?.Invoke();
+        }
+    }
+
     private void SeedTestPartyInternal()
     {
         CreatureRegistry.Initialize();

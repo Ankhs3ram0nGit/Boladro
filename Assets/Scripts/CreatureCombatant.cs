@@ -187,7 +187,7 @@ public class CreatureCombatant : MonoBehaviour
         defense = Mathf.Max(1, finalStats.defense);
         speed = Mathf.Max(1, finalStats.speed);
 
-        if (inst.currentHP <= 0) inst.currentHP = maxHP;
+        if (inst.currentHP < 0) inst.currentHP = 0;
         inst.currentHP = Mathf.Clamp(inst.currentHP, 0, maxHP);
         currentHP = inst.currentHP;
 

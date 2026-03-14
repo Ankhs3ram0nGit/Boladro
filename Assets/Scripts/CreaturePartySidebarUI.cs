@@ -15,6 +15,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
         public Image background;
         public RectTransform iconRect;
         public Image icon;
+        public RectTransform faintedOverlayRect;
+        public Image faintedOverlay;
         public Image glass;
         public Outline glassOutline;
         public RectTransform infoRoot;
@@ -51,6 +53,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
     [Header("Visuals")]
     public Sprite markerBackgroundSprite;
     public Sprite glassOverlaySprite;
+    public Sprite faintedCrossSprite;
     public Color markerColor = Color.white;
     public Color activeMarkerColor = Color.white;
     public Color glassColor = new Color(1f, 1f, 1f, 0.9f);
@@ -362,6 +365,16 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.icon.preserveAspect = true;
         view.icon.raycastTarget = false;
 
+        GameObject faintedGO = new GameObject("FaintedOverlay", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        faintedGO.transform.SetParent(slot.transform, false);
+        view.faintedOverlayRect = faintedGO.GetComponent<RectTransform>();
+        view.faintedOverlay = faintedGO.GetComponent<Image>();
+        view.faintedOverlay.sprite = faintedCrossSprite;
+        view.faintedOverlay.color = new Color(1f, 1f, 1f, 0.25f);
+        view.faintedOverlay.preserveAspect = true;
+        view.faintedOverlay.raycastTarget = false;
+        view.faintedOverlay.enabled = false;
+
         GameObject glassGO = new GameObject("Glass", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Outline));
         glassGO.transform.SetParent(slot.transform, false);
         RectTransform glassRt = glassGO.GetComponent<RectTransform>();
@@ -501,7 +514,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.levelText.text = "Lv " + level;
         view.hpText.text = curHp + "/" + maxHp;
 
-        view.hpFill.fillAmount = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
+        float hpRatio = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
+        view.hpFill.fillAmount = hpRatio;
         view.hpFill.color = ResolveHpTierColor(view.hpFill.fillAmount);
         view.xpFill.fillAmount = ComputeXpRatio(instance);
 
@@ -516,6 +530,13 @@ public class CreaturePartySidebarUI : MonoBehaviour
         LayoutText(view.nameText.rectTransform, new Vector2(0f, 0.72f), new Vector2(0.75f, 1f));
         LayoutText(view.levelText.rectTransform, new Vector2(0.75f, 0.72f), new Vector2(1f, 1f));
         LayoutText(view.hpText.rectTransform, new Vector2(0.55f, 0.28f), new Vector2(1f, 0.42f));
+
+        if (view.faintedOverlay != null)
+        {
+            view.faintedOverlay.sprite = faintedCrossSprite;
+            view.faintedOverlay.color = new Color(1f, 1f, 1f, 0.25f);
+            view.faintedOverlay.enabled = curHp <= 0;
+        }
     }
 
     private void RefreshLiveSlotData()
@@ -571,6 +592,13 @@ public class CreaturePartySidebarUI : MonoBehaviour
             if (view.background != null)
             {
                 view.background.color = view.isActive ? activeMarkerColor : markerColor;
+            }
+
+            if (view.faintedOverlay != null)
+            {
+                view.faintedOverlay.sprite = faintedCrossSprite;
+                view.faintedOverlay.color = new Color(1f, 1f, 1f, 0.25f);
+                view.faintedOverlay.enabled = curHp <= 0;
             }
         }
     }
@@ -672,6 +700,16 @@ public class CreaturePartySidebarUI : MonoBehaviour
             float iconX = Mathf.Lerp(collapsedIconX, expandedIconX, view.expandT);
             view.iconRect.anchoredPosition = new Vector2(iconX, 0f);
 
+            if (view.faintedOverlayRect != null)
+            {
+                view.faintedOverlayRect.anchorMin = view.iconRect.anchorMin;
+                view.faintedOverlayRect.anchorMax = view.iconRect.anchorMax;
+                view.faintedOverlayRect.pivot = view.iconRect.pivot;
+                view.faintedOverlayRect.sizeDelta = view.iconRect.sizeDelta;
+                view.faintedOverlayRect.anchoredPosition = view.iconRect.anchoredPosition;
+                view.faintedOverlayRect.SetAsLastSibling();
+            }
+
             view.infoRoot.anchorMin = new Vector2(0f, 0f);
             view.infoRoot.anchorMax = new Vector2(1f, 1f);
             view.infoRoot.pivot = new Vector2(0.5f, 0.5f);
@@ -763,6 +801,12 @@ public class CreaturePartySidebarUI : MonoBehaviour
         {
             glassOverlaySprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
                 "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_FrameSlot01c.png");
+        }
+
+        if (faintedCrossSprite == null)
+        {
+            faintedCrossSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_IconCross01a.png");
         }
 #endif
     }

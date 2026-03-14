@@ -115,6 +115,12 @@ public class PlayerHealth : MonoBehaviour
         currentHealth = maxHealth;
         transform.position = respawnPosition;
 
+        PlayerCreatureParty party = GetComponent<PlayerCreatureParty>();
+        if (party != null)
+        {
+            party.ReviveAllCreaturesToFull();
+        }
+
         PlayerMover mover = GetComponent<PlayerMover>();
         if (mover != null) mover.enabled = true;
 

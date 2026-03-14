@@ -50,6 +50,7 @@ public class ActivePartyFollowerController : MonoBehaviour
     private bool cycleKeyDown;
     private float cycleKeyDownTime;
     private bool followerSpriteFacesRight = true;
+    private bool resolvingActiveIndex;
 
     void Awake()
     {
@@ -133,8 +134,10 @@ public class ActivePartyFollowerController : MonoBehaviour
 
         int count = party.ActiveCreatures.Count;
         if (count <= 0) return;
+        if (!party.HasAnyAliveCreatures()) return;
 
-        int next = (party.ActivePartyIndex + 1) % count;
+        int next = party.FindNextAlivePartyIndex(party.ActivePartyIndex);
+        if (next < 0) return;
         party.SetActivePartyIndex(next);
     }
 
@@ -238,7 +241,24 @@ public class ActivePartyFollowerController : MonoBehaviour
 
         CreatureRegistry.Initialize();
 
-        int idx = Mathf.Clamp(party.ActivePartyIndex, 0, party.ActiveCreatures.Count - 1);
+        int idx = ResolveUsableActiveIndex();
+        if (idx < 0)
+        {
+            if (followerRoot != null) followerRoot.SetActive(false);
+            return;
+        }
+
+        if (idx != party.ActivePartyIndex)
+        {
+            if (!resolvingActiveIndex)
+            {
+                resolvingActiveIndex = true;
+                party.SetActivePartyIndex(idx);
+                resolvingActiveIndex = false;
+            }
+            return;
+        }
+
         CreatureInstance active = party.ActiveCreatures[idx];
         CreatureDefinition def = active != null ? CreatureRegistry.Get(active.definitionID) : null;
 
@@ -276,6 +296,17 @@ public class ActivePartyFollowerController : MonoBehaviour
         }
 
         FaceFollowerTowardPlayer();
+    }
+
+    private int ResolveUsableActiveIndex()
+    {
+        if (party == null || party.ActiveCreatures == null || party.ActiveCreatures.Count == 0) return -1;
+
+        int activeIndex = Mathf.Clamp(party.ActivePartyIndex, 0, party.ActiveCreatures.Count - 1);
+        CreatureInstance active = party.ActiveCreatures[activeIndex];
+        if (active != null && active.currentHP > 0) return activeIndex;
+
+        return party.FindFirstAlivePartyIndex();
     }
 
     private void FaceFollowerTowardPlayer()

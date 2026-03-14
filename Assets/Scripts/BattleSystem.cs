@@ -184,6 +184,10 @@ public class BattleSystem : MonoBehaviour
         playerMover = GetComponent<PlayerMover>();
         playerHealth = GetComponent<PlayerHealth>();
         EnsurePlayerPartySource();
+        if (playerParty != null)
+        {
+            playerParty.TrySetActiveToFirstAlive();
+        }
 
         AutoFindUI();
 
@@ -598,6 +602,17 @@ public class BattleSystem : MonoBehaviour
             IsEngagedBattleActive = false;
         }
 
+        EnsurePlayerPartySource();
+        if (playerParty != null)
+        {
+            if (!playerParty.HasAnyAliveCreatures())
+            {
+                SetEngageDebug("Engage blocked: all party creatures are fainted.");
+                return false;
+            }
+            playerParty.TrySetActiveToFirstAlive();
+        }
+
         const float strictEncounterRangeTiles = 5f;
         engageRadius = strictEncounterRangeTiles;
         RefreshEngageDebugSnapshot(strictEncounterRangeTiles);
@@ -875,6 +890,12 @@ public class BattleSystem : MonoBehaviour
         {
             enemyAI.EnterBattle();
             enemyAI.ForceStop();
+        }
+
+        EnsurePlayerPartySource();
+        if (playerParty != null)
+        {
+            playerParty.TrySetActiveToFirstAlive();
         }
 
         playerCreature = ResolvePlayerCombatant();
@@ -3783,11 +3804,15 @@ public class BattleSystem : MonoBehaviour
 
             if (inst != null)
             {
-                if (resetHpToFull || inst.currentHP <= 0)
+                int maxHp = CreatureInstanceFactory.ComputeMaxHP(def, inst.soulTraits, inst.level);
+                if (resetHpToFull)
                 {
-                    int maxHp = CreatureInstanceFactory.ComputeMaxHP(def, inst.soulTraits, inst.level);
                     inst.currentHP = Mathf.Max(1, maxHp);
                     CreatureInstanceFactory.RefillPP(def, inst);
+                }
+                else
+                {
+                    inst.currentHP = Mathf.Clamp(inst.currentHP, 0, Mathf.Max(1, maxHp));
                 }
             }
 
@@ -3803,7 +3828,7 @@ public class BattleSystem : MonoBehaviour
         combatant.autoInitWhelpling = false;
         combatant.InitWhelpling(lvl);
         combatant.creatureName = ToDisplayName(creatureID, "Whelpling");
-        if (resetHpToFull || combatant.currentHP <= 0 || combatant.currentHP > combatant.maxHP)
+        if (resetHpToFull || combatant.currentHP > combatant.maxHP)
         {
             combatant.currentHP = combatant.maxHP;
         }
