@@ -1,6 +1,9 @@
 using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public class PlayerHealth : MonoBehaviour
 {
@@ -9,6 +12,7 @@ public class PlayerHealth : MonoBehaviour
     public bool debugDamageKey = true;
     public Transform followerToTeleport;
     public Vector3 followerRespawnOffset = new Vector3(-0.6f, 0.2f, 0f);
+    public AudioClip playerDamageSfx;
 
     public event Action<int, int> OnHealthChanged;
     public event Action OnDied;
@@ -18,11 +22,14 @@ public class PlayerHealth : MonoBehaviour
     private Vector3 respawnPosition;
     private float invulnerableUntil = -1f;
     private CameraFollow2D cameraFollow;
+    private AudioSource damageSfxSource;
 
     public bool IsInvulnerable => Time.time < invulnerableUntil;
 
     void Start()
     {
+        EnsureDamageAudioAsset();
+        EnsureDamageAudioSource();
         int previousMax = maxHealth;
         if (maxHealth != 10)
         {
@@ -78,6 +85,7 @@ public class PlayerHealth : MonoBehaviour
         if (dealt > 0)
         {
             TriggerDamageShake(dealt);
+            PlayDamageSfx();
         }
         NotifyHealth();
 
@@ -162,5 +170,35 @@ public class PlayerHealth : MonoBehaviour
         if (cameraFollow == null) return;
         float intensity = Mathf.Clamp(0.8f + (damageAmount * 0.2f), 0.8f, 2.0f);
         cameraFollow.TriggerDamageShake(intensity);
+    }
+
+    void EnsureDamageAudioAsset()
+    {
+#if UNITY_EDITOR
+        if (playerDamageSfx == null)
+        {
+            playerDamageSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/Stereo/mp3/JDSherbert - Ultimate UI SFX Pack - Error - 1.mp3");
+        }
+#endif
+    }
+
+    void EnsureDamageAudioSource()
+    {
+        if (damageSfxSource != null) return;
+        damageSfxSource = gameObject.AddComponent<AudioSource>();
+
+        damageSfxSource.playOnAwake = false;
+        damageSfxSource.loop = false;
+        damageSfxSource.spatialBlend = 0f;
+        damageSfxSource.volume = 1f;
+    }
+
+    void PlayDamageSfx()
+    {
+        if (playerDamageSfx == null) return;
+        EnsureDamageAudioSource();
+        if (damageSfxSource == null) return;
+        damageSfxSource.PlayOneShot(playerDamageSfx);
     }
 }

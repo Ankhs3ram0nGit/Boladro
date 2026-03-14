@@ -5,6 +5,9 @@ using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
 using System.Collections.Generic;
 using System.Text;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public class InventoryUI : MonoBehaviour
 {
@@ -56,6 +59,7 @@ public class InventoryUI : MonoBehaviour
     public Color emptySlotFillColor = new Color(0f, 0f, 0f, SlotFillOpacity);
     public int slotInnerPadding = 6;
     public int selectedHotbarIndex = 0;
+    public AudioClip inventorySlotSelectSfx;
 
     private InventorySlotUI[] hotbarSlots;
     private InventorySlotUI[] bagSlots;
@@ -114,6 +118,7 @@ public class InventoryUI : MonoBehaviour
     private int draggingCreatureStorageIndex = -1;
     private int draggingCreaturePartyIndex = -1;
     private readonly List<Image> backdropBlurLayers = new List<Image>();
+    private AudioSource inventoryUiSfxSource;
 
     private PlayerCreatureParty party;
     private PlayerCreatureStorage storage;
@@ -131,6 +136,8 @@ public class InventoryUI : MonoBehaviour
     void Awake()
     {
         NormalizeVisualSettings();
+        EnsureInventoryAudioAssets();
+        EnsureInventoryUiSfxSource();
         EnsureEventSystem();
         EnsureCreatureSources();
         if (inventory == null) inventory = FindFirstObjectByType<InventoryModel>();
@@ -462,6 +469,7 @@ public class InventoryUI : MonoBehaviour
         {
             selectedHotbarIndex = Mathf.Clamp(slot.index, 0, Mathf.Max(0, inventory != null && inventory.hotbar != null ? inventory.hotbar.Length - 1 : 0));
         }
+        PlayInventorySlotSelectSfx();
         Refresh();
     }
 
@@ -471,6 +479,10 @@ public class InventoryUI : MonoBehaviour
         if (hotbarSlots != null && hotbarSlots.Length > 0)
         {
             selectedInventorySlot = hotbarSlots[selectedHotbarIndex];
+        }
+        if (IsPanelOpen)
+        {
+            PlayInventorySlotSelectSfx();
         }
         Refresh();
     }
@@ -2709,6 +2721,35 @@ public class InventoryUI : MonoBehaviour
         // Always use transparent-center slot sprites so the inner fill controls opacity.
         slotSprite = CreateSlotSprite(new Color32(150, 150, 150, 255));
         selectedSprite = CreateSlotSprite(new Color32(255, 215, 90, 255));
+    }
+
+    void EnsureInventoryAudioAssets()
+    {
+#if UNITY_EDITOR
+        if (inventorySlotSelectSfx == null)
+        {
+            inventorySlotSelectSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/Text 1.wav");
+        }
+#endif
+    }
+
+    void EnsureInventoryUiSfxSource()
+    {
+        if (inventoryUiSfxSource != null) return;
+        inventoryUiSfxSource = gameObject.AddComponent<AudioSource>();
+        inventoryUiSfxSource.playOnAwake = false;
+        inventoryUiSfxSource.loop = false;
+        inventoryUiSfxSource.spatialBlend = 0f;
+        inventoryUiSfxSource.volume = 1f;
+    }
+
+    void PlayInventorySlotSelectSfx()
+    {
+        if (inventorySlotSelectSfx == null) return;
+        EnsureInventoryUiSfxSource();
+        if (inventoryUiSfxSource == null) return;
+        inventoryUiSfxSource.PlayOneShot(inventorySlotSelectSfx);
     }
 
 #if UNITY_EDITOR

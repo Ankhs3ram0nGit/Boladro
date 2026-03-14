@@ -89,6 +89,16 @@ public class BattleSystem : MonoBehaviour
     [Tooltip("Final minimum damage after all scaling.")]
     [Min(1)] public int minimumDamagePerHit = 1;
 
+    [Header("Battle Audio")]
+    public AudioClip encounterStartSfx;
+    public AudioClip moveDamageSfx;
+    public AudioClip debuffSfx;
+
+    [Header("Encounter Transition")]
+    [Min(0f)] public float encounterBlackoutFadeIn = 0.18f;
+    [Min(0f)] public float encounterBlackoutHold = 0.05f;
+    [Min(0f)] public float encounterBlackoutFadeOut = 0.20f;
+
     private PlayerMover playerMover;
     private PlayerHealth playerHealth;
     private WildCreatureAI currentEnemyAI;
@@ -136,6 +146,10 @@ public class BattleSystem : MonoBehaviour
     private readonly Dictionary<CreatureCombatant, int> guaranteedDodgeCharges = new Dictionary<CreatureCombatant, int>();
     private Sprite shadowEllipseSprite;
     private Sprite neutralFillSprite;
+    private AudioSource battleSfxSource;
+    private Canvas battleBlackoutCanvas;
+    private Image battleBlackoutImage;
+    private bool battleStartTransitionInProgress;
     private Vector3 playerSpriteBaseLocalPos;
     private Vector3 enemySpriteBaseLocalPos;
     private Vector3 playerSpriteBaseLocalScale = Vector3.one;
@@ -172,20 +186,24 @@ public class BattleSystem : MonoBehaviour
     {
         // Recover from stale play-mode state when domain reload is disabled.
         inBattle = false;
+        battleStartTransitionInProgress = false;
         waitingForPlayerMove = false;
         turnResolutionInProgress = false;
         playerFaintedVisualLocked = false;
         enemyFaintedVisualLocked = false;
         battleParticipants.Clear();
         IsEngagedBattleActive = false;
+        SetBlackoutAlpha(0f);
     }
 
     void OnDisable()
     {
         IsEngagedBattleActive = false;
+        battleStartTransitionInProgress = false;
         swapMenuOpen = false;
         battleParticipants.Clear();
         if (swapMenuRoot != null) swapMenuRoot.SetActive(false);
+        SetBlackoutAlpha(0f);
     }
 
     void OnDestroy()
@@ -231,6 +249,10 @@ public class BattleSystem : MonoBehaviour
         EnsureButtonLabels();
         ApplyButtonSkins();
         EnsureSwapMenuSprites();
+        EnsureBattleAudioAssets();
+        EnsureBattleSfxSource();
+        EnsureBattleBlackoutOverlay();
+        SetBlackoutAlpha(0f);
     }
 
     void AutoFindUI()
@@ -436,6 +458,133 @@ public class BattleSystem : MonoBehaviour
 #endif
     }
 
+    void EnsureBattleAudioAssets()
+    {
+#if UNITY_EDITOR
+        if (encounterStartSfx == null)
+        {
+            encounterStartSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/400 Sounds Pack/Musical Effects/8_bit_negative.wav");
+        }
+        if (moveDamageSfx == null)
+        {
+            moveDamageSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/400 Sounds Pack/Retro/hurt.wav");
+        }
+        if (debuffSfx == null)
+        {
+            debuffSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/400 Sounds Pack/Retro/undesired_effect.wav");
+        }
+#endif
+    }
+
+    void EnsureBattleSfxSource()
+    {
+        if (battleSfxSource != null) return;
+        battleSfxSource = gameObject.AddComponent<AudioSource>();
+        battleSfxSource.playOnAwake = false;
+        battleSfxSource.loop = false;
+        battleSfxSource.spatialBlend = 0f;
+        battleSfxSource.volume = 1f;
+    }
+
+    void PlayBattleClip(AudioClip clip)
+    {
+        if (clip == null) return;
+        EnsureBattleSfxSource();
+        if (battleSfxSource == null) return;
+        battleSfxSource.PlayOneShot(clip);
+    }
+
+    void EnsureBattleBlackoutOverlay()
+    {
+        if (battleBlackoutImage != null && battleBlackoutCanvas != null) return;
+
+        const string blackoutCanvasName = "BattleBlackoutOverlayCanvas";
+        Transform existing = transform.Find(blackoutCanvasName);
+        if (existing == null)
+        {
+            GameObject canvasGo = new GameObject(blackoutCanvasName, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            canvasGo.transform.SetParent(transform, false);
+            existing = canvasGo.transform;
+        }
+
+        battleBlackoutCanvas = existing.GetComponent<Canvas>();
+        if (battleBlackoutCanvas == null) battleBlackoutCanvas = existing.gameObject.AddComponent<Canvas>();
+        battleBlackoutCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        battleBlackoutCanvas.overrideSorting = true;
+        battleBlackoutCanvas.sortingOrder = short.MaxValue - 4;
+
+        CanvasScaler scaler = existing.GetComponent<CanvasScaler>();
+        if (scaler == null) scaler = existing.gameObject.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.matchWidthOrHeight = 0.5f;
+
+        GraphicRaycaster raycaster = existing.GetComponent<GraphicRaycaster>();
+        if (raycaster == null) raycaster = existing.gameObject.AddComponent<GraphicRaycaster>();
+        raycaster.enabled = false;
+
+        Transform imageTf = existing.Find("BlackoutImage");
+        if (imageTf == null)
+        {
+            GameObject imageGo = new GameObject("BlackoutImage", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            imageGo.transform.SetParent(existing, false);
+            imageTf = imageGo.transform;
+        }
+
+        battleBlackoutImage = imageTf.GetComponent<Image>();
+        if (battleBlackoutImage == null) battleBlackoutImage = imageTf.gameObject.AddComponent<Image>();
+        battleBlackoutImage.raycastTarget = false;
+        battleBlackoutImage.sprite = null;
+        battleBlackoutImage.type = Image.Type.Simple;
+        battleBlackoutImage.color = new Color(0f, 0f, 0f, 0f);
+
+        RectTransform imageRt = battleBlackoutImage.rectTransform;
+        imageRt.anchorMin = Vector2.zero;
+        imageRt.anchorMax = Vector2.one;
+        imageRt.offsetMin = Vector2.zero;
+        imageRt.offsetMax = Vector2.zero;
+    }
+
+    void SetBlackoutAlpha(float alpha)
+    {
+        EnsureBattleBlackoutOverlay();
+        if (battleBlackoutImage == null) return;
+        Color c = battleBlackoutImage.color;
+        c.a = Mathf.Clamp01(alpha);
+        battleBlackoutImage.color = c;
+    }
+
+    IEnumerator FadeBlackout(float from, float to, float duration)
+    {
+        EnsureBattleBlackoutOverlay();
+        if (battleBlackoutImage == null)
+        {
+            yield break;
+        }
+
+        float safeDuration = Mathf.Max(0f, duration);
+        if (safeDuration <= 0.0001f)
+        {
+            SetBlackoutAlpha(to);
+            yield break;
+        }
+
+        SetBlackoutAlpha(from);
+        float elapsed = 0f;
+        while (elapsed < safeDuration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float p = Mathf.Clamp01(elapsed / safeDuration);
+            SetBlackoutAlpha(Mathf.Lerp(from, to, p));
+            yield return null;
+        }
+
+        SetBlackoutAlpha(to);
+    }
+
     void Update()
     {
         RecoverFromStaleBattleState();
@@ -457,6 +606,11 @@ public class BattleSystem : MonoBehaviour
     {
         engageDebugPressCount++;
         SetEngageDebug("E pressed. Trying to engage.");
+        if (battleStartTransitionInProgress)
+        {
+            SetEngageDebug("Blocked: encounter transition is already running.");
+            return false;
+        }
         RecoverFromStaleBattleState(force: true);
         if (inBattle)
         {
@@ -677,6 +831,12 @@ public class BattleSystem : MonoBehaviour
 
     bool TryStartBattleInternal()
     {
+        if (battleStartTransitionInProgress)
+        {
+            SetEngageDebug("Engage blocked: encounter transition already active.");
+            return false;
+        }
+
         if (!inBattle)
         {
             IsEngagedBattleActive = false;
@@ -950,6 +1110,41 @@ public class BattleSystem : MonoBehaviour
 
     public void StartBattle(WildCreatureAI enemyAI)
     {
+        if (inBattle || battleStartTransitionInProgress) return;
+        StartCoroutine(BeginEncounterTransitionAndStartBattle(enemyAI));
+    }
+
+    IEnumerator BeginEncounterTransitionAndStartBattle(WildCreatureAI enemyAI)
+    {
+        battleStartTransitionInProgress = true;
+        currentEnemyAI = enemyAI;
+        EnsureBattleSfxSource();
+        EnsureBattleBlackoutOverlay();
+        PlayBattleClip(encounterStartSfx);
+
+        yield return StartCoroutine(FadeBlackout(0f, 1f, encounterBlackoutFadeIn));
+        float hold = Mathf.Max(0f, encounterBlackoutHold);
+        if (hold > 0f)
+        {
+            yield return new WaitForSecondsRealtime(hold);
+        }
+
+        StartBattleImmediate(enemyAI);
+        if (!inBattle)
+        {
+            yield return StartCoroutine(FadeBlackout(1f, 0f, encounterBlackoutFadeOut));
+            SetBlackoutAlpha(0f);
+            battleStartTransitionInProgress = false;
+            yield break;
+        }
+
+        yield return StartCoroutine(FadeBlackout(1f, 0f, encounterBlackoutFadeOut));
+        SetBlackoutAlpha(0f);
+        battleStartTransitionInProgress = false;
+    }
+
+    void StartBattleImmediate(WildCreatureAI enemyAI)
+    {
         if (inBattle) return;
         currentEnemyAI = enemyAI;
 
@@ -1135,7 +1330,7 @@ public class BattleSystem : MonoBehaviour
 
     public void StartEncounterFromSpawn(CreatureEncounterData data)
     {
-        if (data == null || inBattle) return;
+        if (data == null || inBattle || battleStartTransitionInProgress) return;
 
         WildCreatureAI spawned = CreateEncounterEnemy(data);
         if (spawned == null)
@@ -1199,12 +1394,14 @@ public class BattleSystem : MonoBehaviour
     {
         inBattle = false;
         IsEngagedBattleActive = false;
+        battleStartTransitionInProgress = false;
         waitingForPlayerMove = false;
         turnResolutionInProgress = false;
         playerFaintedVisualLocked = false;
         enemyFaintedVisualLocked = false;
         guaranteedDodgeCharges.Clear();
         battleParticipants.Clear();
+        SetBlackoutAlpha(0f);
 
         if (battleRoot != null) battleRoot.SetActive(false);
         if (movePanel != null) movePanel.SetActive(false);
@@ -2670,9 +2867,18 @@ public class BattleSystem : MonoBehaviour
         float typeMultiplier = EvaluateTypeMultiplier(atk.type, defender);
         int damage = CalculateDamage(attacker, defender, atk, isCrit, typeMultiplier);
 
-        yield return StartCoroutine(AnimateAttack(attackerImage, defenderImage, atk.baseDamage > 0));
+        bool dealsDamage = atk.baseDamage > 0;
+        if (dealsDamage)
+        {
+            yield return StartCoroutine(AnimateAttack(attackerImage, defenderImage, true));
+            PlayBattleClip(moveDamageSfx);
+        }
+        else
+        {
+            yield return new WaitForSeconds(0.08f);
+        }
 
-        if (atk.baseDamage > 0)
+        if (dealsDamage)
         {
             defender.currentHP = Mathf.Max(0, defender.currentHP - damage);
         }
@@ -2682,7 +2888,11 @@ public class BattleSystem : MonoBehaviour
             AddGuaranteedDodge(attacker, 1);
         }
 
-        ApplyStatusFromAttack(defender, atk, isCrit);
+        bool debuffApplied = ApplyStatusFromAttack(defender, atk, isCrit);
+        if (debuffApplied)
+        {
+            PlayBattleClip(debuffSfx);
+        }
 
         attacker.SyncInstanceRuntimeState();
         defender.SyncInstanceRuntimeState();
@@ -2691,7 +2901,7 @@ public class BattleSystem : MonoBehaviour
         SetMessage(attacker.creatureName + " used " + atk.name + "!");
         yield return new WaitForSeconds(actionNarrationDelay);
 
-        if (atk.baseDamage > 0)
+        if (dealsDamage)
         {
             string effectiveness = ResolveEffectivenessNarration(typeMultiplier);
             if (!string.IsNullOrEmpty(effectiveness))
@@ -2884,11 +3094,11 @@ public class BattleSystem : MonoBehaviour
         return 1f;
     }
 
-    void ApplyStatusFromAttack(CreatureCombatant defender, AttackData atk, bool isCrit)
+    bool ApplyStatusFromAttack(CreatureCombatant defender, AttackData atk, bool isCrit)
     {
-        if (atk.statusToApply == null) return;
-        if (defender == null) return;
-        if (atk.statusToApply.Value == StatusEffectType.None) return;
+        if (atk.statusToApply == null) return false;
+        if (defender == null) return false;
+        if (atk.statusToApply.Value == StatusEffectType.None) return false;
 
         if (Random.value <= atk.statusChance)
         {
@@ -2898,7 +3108,10 @@ public class BattleSystem : MonoBehaviour
                 turns = isCrit ? 3 : 2;
             }
             defender.AddOrRefreshStatus(atk.statusToApply.Value, turns);
+            return true;
         }
+
+        return false;
     }
 
     bool IsSkippedByStatus(CreatureCombatant combatant)
