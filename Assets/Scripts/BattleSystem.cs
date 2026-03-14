@@ -108,6 +108,7 @@ public class BattleSystem : MonoBehaviour
     private Font cachedDefaultFont;
     private readonly Dictionary<string, Sprite> creatureSpriteCache = new Dictionary<string, Sprite>();
     private PlayerCreatureParty playerParty;
+    private PlayerCreatureStorage playerStorage;
     private GameObject swapMenuRoot;
     private RectTransform swapMenuCardsRoot;
     private Button swapMenuExitButton;
@@ -351,6 +352,27 @@ public class BattleSystem : MonoBehaviour
         }
     }
 
+    void EnsureCreatureStorageSource()
+    {
+        EnsurePlayerPartySource();
+        if (playerStorage != null) return;
+        if (playerMover == null)
+        {
+            playerMover = GetComponent<PlayerMover>();
+        }
+        if (playerMover == null) return;
+
+        playerStorage = playerMover.GetComponent<PlayerCreatureStorage>();
+        if (playerStorage == null)
+        {
+            playerStorage = playerMover.gameObject.AddComponent<PlayerCreatureStorage>();
+        }
+        if (playerStorage != null)
+        {
+            playerStorage.EnsureInitialized(playerParty);
+        }
+    }
+
     bool EnsureActivePartySlotIsUsable()
     {
         EnsurePlayerPartySource();
@@ -459,7 +481,7 @@ public class BattleSystem : MonoBehaviour
         if (captureButton != null)
         {
             captureButton.onClick.RemoveAllListeners();
-            captureButton.onClick.AddListener(() => SetMessage("Capture not implemented yet."));
+            captureButton.onClick.AddListener(TryCapture);
         }
         if (runButton != null)
         {
@@ -1277,6 +1299,145 @@ public class BattleSystem : MonoBehaviour
                 UpdateButtonVisualState(moveButtons[i]);
             }
         }
+    }
+
+    void TryCapture()
+    {
+        if (turnResolutionInProgress || !inBattle || !waitingForPlayerMove) return;
+        if (playerCreature == null || enemyCreature == null)
+        {
+            SetMessage("No target to capture.");
+            return;
+        }
+        if (enemyCreature.currentHP <= 0)
+        {
+            SetMessage("Cannot capture a fainted creature.");
+            return;
+        }
+
+        EnsurePlayerPartySource();
+        EnsureCreatureStorageSource();
+        if (playerParty == null)
+        {
+            SetMessage("Party system unavailable.");
+            return;
+        }
+        if (playerStorage == null)
+        {
+            SetMessage("Creature storage unavailable.");
+            return;
+        }
+
+        bool partyHasSpace = playerParty.HasSpaceInParty();
+        bool storageHasSpace = playerStorage.HasSpace();
+        if (!partyHasSpace && !storageHasSpace)
+        {
+            SetMessage("No space: party and creature storage are full.");
+            return;
+        }
+
+        CreatureInstance captured = CreateCapturedInstanceFromEnemy();
+        if (captured == null)
+        {
+            SetMessage("Capture failed.");
+            return;
+        }
+
+        bool addedToParty;
+        if (!playerStorage.TryAddCapturedCreature(captured, out addedToParty))
+        {
+            SetMessage("No space to capture this creature.");
+            return;
+        }
+
+        waitingForPlayerMove = false;
+        turnResolutionInProgress = true;
+        RefreshTurnInputState();
+
+        string targetName = captured.DisplayName;
+        SetMessage(addedToParty
+            ? targetName + " was captured and joined your party!"
+            : targetName + " was captured and sent to creature storage!");
+
+        StartCoroutine(CompleteCaptureAndEndBattle());
+    }
+
+    IEnumerator CompleteCaptureAndEndBattle()
+    {
+        yield return new WaitForSeconds(Mathf.Max(0.45f, actionNarrationDelay * 0.55f));
+        turnResolutionInProgress = false;
+        EndBattle(true);
+    }
+
+    CreatureInstance CreateCapturedInstanceFromEnemy()
+    {
+        if (enemyCreature == null) return null;
+
+        CreatureInstance source = enemyCreature.Instance;
+        CreatureInstance captured = source != null ? CloneCreatureInstance(source) : null;
+        if (captured == null)
+        {
+            CreatureDefinition def = enemyCreature.Definition;
+            if (def == null) return null;
+            captured = CreatureInstanceFactory.CreateWild(def, Mathf.Max(1, enemyCreature.level));
+            if (captured == null) return null;
+        }
+
+        captured.ownerID = "player";
+        captured.ownershipState = OwnershipState.Captured;
+        captured.level = Mathf.Clamp(captured.level <= 0 ? enemyCreature.level : captured.level, 1, CreatureExperienceSystem.MaxLevel);
+        if (string.IsNullOrWhiteSpace(captured.creatureUID))
+        {
+            captured.creatureUID = System.Guid.NewGuid().ToString("N");
+        }
+        if (string.IsNullOrWhiteSpace(captured.definitionID))
+        {
+            captured.definitionID = ResolveCreatureID(
+                currentEnemyAI != null ? currentEnemyAI.gameObject : enemyCreature.gameObject,
+                enemyCreature);
+        }
+
+        CreatureDefinition resolved = CreatureRegistry.Get(captured.definitionID);
+        if (resolved != null)
+        {
+            int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(resolved, captured.soulTraits, captured.level));
+            int hp = enemyCreature.currentHP;
+            if (source != null) hp = source.currentHP;
+            captured.currentHP = Mathf.Clamp(hp, 0, maxHp);
+            if (captured.currentPP == null || captured.currentPP.Length < 4)
+            {
+                captured.currentPP = new int[4];
+            }
+        }
+
+        WorldSpawnMarker marker = currentEnemyAI != null ? currentEnemyAI.GetComponent<WorldSpawnMarker>() : null;
+        captured.capturedInZoneID = marker != null ? marker.zoneID : captured.capturedInZoneID;
+        captured.captureTimestamp = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        return captured;
+    }
+
+    static CreatureInstance CloneCreatureInstance(CreatureInstance source)
+    {
+        if (source == null) return null;
+        CreatureInstance clone = new CreatureInstance
+        {
+            creatureUID = source.creatureUID,
+            definitionID = source.definitionID,
+            ownerID = source.ownerID,
+            ownershipState = source.ownershipState,
+            nickname = source.nickname,
+            level = source.level,
+            currentHP = source.currentHP,
+            currentPP = source.currentPP != null ? (int[])source.currentPP.Clone() : new int[4],
+            soulTraits = source.soulTraits,
+            totalExperience = source.totalExperience,
+            totalBattles = source.totalBattles,
+            isShiny = source.isShiny,
+            capturedInZoneID = source.capturedInZoneID,
+            captureTimestamp = source.captureTimestamp,
+            familiarityTier = source.familiarityTier
+        };
+        return clone;
     }
 
     void OpenSwapMenu()

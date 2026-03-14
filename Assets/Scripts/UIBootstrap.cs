@@ -42,6 +42,12 @@ public class UIBootstrap : MonoBehaviour
 
     void ApplyLayout()
     {
+        InventoryUI typedInventoryUI = inventoryUI as InventoryUI;
+        if (typedInventoryUI == null && hudRect != null)
+        {
+            typedInventoryUI = hudRect.GetComponent<InventoryUI>();
+        }
+
         if (canvasRect == null) canvasRect = GetComponent<RectTransform>();
         if (hudRect == null)
         {
@@ -88,8 +94,11 @@ public class UIBootstrap : MonoBehaviour
         NormalizeHearts();
         AutoSizeHotbarFromInventory();
         NormalizeHotbar();
-        NormalizeInventoryPanel();
-        NormalizeBag();
+        if (typedInventoryUI == null)
+        {
+            NormalizeInventoryPanel();
+            NormalizeBag();
+        }
         MakeHudTransparent();
     }
 
@@ -241,7 +250,15 @@ public class UIBootstrap : MonoBehaviour
             Image panelImg = inventoryPanelRect.GetComponent<Image>();
             if (panelImg != null)
             {
-                panelImg.color = new Color(0f, 0f, 0f, 0.6f);
+                InventoryUI typedInventoryUI = inventoryUI as InventoryUI;
+                if (typedInventoryUI == null && hudRect != null)
+                {
+                    typedInventoryUI = hudRect.GetComponent<InventoryUI>();
+                }
+                if (typedInventoryUI == null)
+                {
+                    panelImg.color = new Color(0f, 0f, 0f, 0.6f);
+                }
                 panelImg.raycastTarget = true;
             }
         }

@@ -43,6 +43,8 @@ public class PlayerCreatureParty : MonoBehaviour
     private readonly List<CreatureInstance> activeCreatures = new List<CreatureInstance>();
     public IReadOnlyList<CreatureInstance> ActiveCreatures => activeCreatures;
     public int ActivePartyIndex => Mathf.Clamp(activePartyIndex, 0, Mathf.Max(0, activeCreatures.Count - 1));
+    public int PartyCount => activeCreatures != null ? activeCreatures.Count : 0;
+    public const int MaxPartySize = 6;
 
     public event Action PartyChanged;
 
@@ -147,6 +149,57 @@ public class PlayerCreatureParty : MonoBehaviour
         int idx = FindNextAlivePartyIndex(ActivePartyIndex);
         if (idx < 0) return false;
         SetActivePartyIndex(idx);
+        return true;
+    }
+
+    public bool HasSpaceInParty()
+    {
+        return activeCreatures != null && activeCreatures.Count < MaxPartySize;
+    }
+
+    public bool TryAddCapturedCreature(CreatureInstance instance, bool makeActive = false)
+    {
+        if (instance == null) return false;
+        if (!HasSpaceInParty()) return false;
+
+        CreatureRegistry.Initialize();
+        string canonical = CreatureRegistry.CanonicalizeCreatureID(instance.definitionID);
+        CreatureDefinition def = CreatureRegistry.Get(canonical);
+        if (def == null) return false;
+
+        instance.definitionID = def.creatureID;
+        instance.ownerID = "player";
+        instance.ownershipState = OwnershipState.Captured;
+        instance.level = Mathf.Clamp(instance.level, 1, CreatureExperienceSystem.MaxLevel);
+        if (string.IsNullOrWhiteSpace(instance.creatureUID))
+        {
+            instance.creatureUID = Guid.NewGuid().ToString("N");
+        }
+
+        int maxHp = Mathf.Max(1, CreatureInstanceFactory.ComputeMaxHP(def, instance.soulTraits, instance.level));
+        instance.currentHP = Mathf.Clamp(instance.currentHP, 0, maxHp);
+        if (instance.currentPP == null || instance.currentPP.Length < 4)
+        {
+            int[] pp = new int[4];
+            if (instance.currentPP != null)
+            {
+                int copy = Mathf.Min(4, instance.currentPP.Length);
+                for (int i = 0; i < copy; i++) pp[i] = instance.currentPP[i];
+            }
+            instance.currentPP = pp;
+        }
+
+        activeCreatures.Add(instance);
+        if (makeActive && activeCreatures.Count > 0)
+        {
+            activePartyIndex = activeCreatures.Count - 1;
+        }
+        else
+        {
+            activePartyIndex = Mathf.Clamp(activePartyIndex, 0, activeCreatures.Count - 1);
+        }
+
+        PartyChanged?.Invoke();
         return true;
     }
 
