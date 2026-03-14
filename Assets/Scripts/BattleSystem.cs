@@ -2113,7 +2113,30 @@ public class BattleSystem : MonoBehaviour
 
         if (!consumeTurnOnSelection)
         {
-            UpdateUI();
+            bool playerActsFirstAfterForcedSwap = DecideTurnOrder();
+            if (!playerActsFirstAfterForcedSwap)
+            {
+                SetMessage("Opponent moves first.");
+                yield return new WaitForSeconds(opponentTurnDelay);
+
+                AttackData enemyAttack = ChooseEnemyAttack();
+                if (enemyAttack != null)
+                {
+                    yield return PerformAttack(enemyCreature, playerCreature, enemyAttack);
+                }
+
+                if (playerCreature == null || playerCreature.currentHP <= 0)
+                {
+                    turnResolutionInProgress = false;
+                    HandlePlayerCreatureFaintInBattle();
+                    yield break;
+                }
+
+                ApplyEndOfTurnStatuses(playerCreature);
+                ApplyEndOfTurnStatuses(enemyCreature);
+                UpdateUI();
+            }
+
             waitingForPlayerMove = true;
             turnResolutionInProgress = false;
             SetActionMenuVisible(true);
