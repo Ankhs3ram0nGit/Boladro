@@ -4,6 +4,9 @@ using UnityEngine.UI;
 [ExecuteAlways]
 public class UIBootstrap : MonoBehaviour
 {
+    const float HotbarHorizontalPadding = 24f;
+    const float HotbarVerticalPadding = 20f;
+
     public RectTransform canvasRect;
     public RectTransform hudRect;
     public RectTransform heartsRect;
@@ -83,6 +86,7 @@ public class UIBootstrap : MonoBehaviour
         NormalizeCanvas();
         NormalizeHud();
         NormalizeHearts();
+        AutoSizeHotbarFromInventory();
         NormalizeHotbar();
         NormalizeInventoryPanel();
         NormalizeBag();
@@ -134,12 +138,61 @@ public class UIBootstrap : MonoBehaviour
     void NormalizeHotbar()
     {
         if (hotbarRect == null) return;
+        HorizontalLayoutGroup layout = hotbarRect.GetComponent<HorizontalLayoutGroup>();
+        if (layout != null)
+        {
+            layout.childAlignment = TextAnchor.MiddleCenter;
+            layout.childControlWidth = false;
+            layout.childControlHeight = false;
+            layout.childForceExpandWidth = false;
+            layout.childForceExpandHeight = false;
+        }
+
         hotbarRect.anchorMin = new Vector2(0.5f, 0);
         hotbarRect.anchorMax = new Vector2(0.5f, 0);
         hotbarRect.pivot = new Vector2(0.5f, 0);
         hotbarRect.anchoredPosition = hotbarOffset;
         hotbarRect.sizeDelta = hotbarSize;
         hotbarRect.localScale = Vector3.one;
+    }
+
+    void AutoSizeHotbarFromInventory()
+    {
+        InventoryUI typedInventoryUI = inventoryUI as InventoryUI;
+        if (typedInventoryUI == null && hudRect != null)
+        {
+            typedInventoryUI = hudRect.GetComponent<InventoryUI>();
+        }
+        if (typedInventoryUI == null) return;
+
+        int slotSize = Mathf.Max(1, typedInventoryUI.slotSize);
+        int spacing = Mathf.Max(0, typedInventoryUI.spacing);
+        int slotCount = ResolveHotbarSlotCount(typedInventoryUI);
+
+        float computedWidth = (slotCount * slotSize) + (Mathf.Max(0, slotCount - 1) * spacing) + HotbarHorizontalPadding;
+        float computedHeight = slotSize + HotbarVerticalPadding;
+        hotbarSize = new Vector2(computedWidth, computedHeight);
+    }
+
+    int ResolveHotbarSlotCount(InventoryUI typedInventoryUI)
+    {
+        if (typedInventoryUI == null) return 9;
+        InventoryModel model = typedInventoryUI.inventory;
+        if (model != null)
+        {
+            model.EnsureSlots();
+            if (model.hotbar != null && model.hotbar.Length > 0)
+            {
+                return model.hotbar.Length;
+            }
+
+            if (model.hotbarSize > 0)
+            {
+                return model.hotbarSize;
+            }
+        }
+
+        return 9;
     }
 
     void NormalizeInventoryPanel()

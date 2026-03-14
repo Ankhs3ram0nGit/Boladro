@@ -6,6 +6,10 @@ using UnityEngine.InputSystem.UI;
 
 public class InventoryUI : MonoBehaviour
 {
+    const int MinRecommendedSlotSize = 90;
+    const int DefaultRecommendedIconSize = 75;
+    static readonly Color DefaultSlotNormalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
+
     public InventoryModel inventory;
     public RectTransform hotbarRoot;
     public RectTransform bagRoot;
@@ -26,6 +30,7 @@ public class InventoryUI : MonoBehaviour
 
     void Awake()
     {
+        NormalizeVisualSettings();
         EnsureEventSystem();
         if (inventory == null) inventory = FindFirstObjectByType<InventoryModel>();
         if (panelRoot == null) panelRoot = transform.Find("InventoryPanel") as RectTransform;
@@ -114,6 +119,7 @@ public class InventoryUI : MonoBehaviour
 
     void BuildUI()
     {
+        NormalizeVisualSettings();
         if (inventory == null) return;
         if (hotbarRoot == null || bagRoot == null) return;
         inventory.EnsureSlots();
@@ -259,6 +265,7 @@ public class InventoryUI : MonoBehaviour
 
     public void Refresh()
     {
+        NormalizeVisualSettings();
         if (inventory == null) return;
 
         if (hotbarSlots != null)
@@ -267,6 +274,7 @@ public class InventoryUI : MonoBehaviour
             {
                 InventorySlot slot = inventory.GetHotbarSlot(i);
                 hotbarSlots[i].SetData(slot);
+                ResizeSlotVisuals(hotbarSlots[i]);
                 ApplyHotbarSelection(hotbarSlots[i], i == selectedHotbarIndex);
             }
         }
@@ -277,6 +285,7 @@ public class InventoryUI : MonoBehaviour
             {
                 InventorySlot slot = inventory.GetBagSlot(i);
                 bagSlots[i].SetData(slot);
+                ResizeSlotVisuals(bagSlots[i]);
             }
         }
     }
@@ -285,14 +294,10 @@ public class InventoryUI : MonoBehaviour
     {
         if (slot == null || slot.background == null) return;
         slot.background.color = selected ? selectedColor : normalColor;
-        if (selected && selectedSprite != null)
-        {
-            slot.background.sprite = selectedSprite;
-        }
-        else if (slotSprite != null)
-        {
-            slot.background.sprite = slotSprite;
-        }
+        Sprite bgSprite = selected ? selectedSprite : slotSprite;
+        if (bgSprite != null) slot.background.sprite = bgSprite;
+        slot.background.type = bgSprite != null && bgSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+        slot.background.preserveAspect = false;
     }
 
     public void SelectHotbar(int index)
@@ -428,6 +433,52 @@ public class InventoryUI : MonoBehaviour
 
         tex.Apply();
         return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 16);
+    }
+
+    void ResizeSlotVisuals(InventorySlotUI slot)
+    {
+        if (slot == null) return;
+        if (slot.background != null)
+        {
+            RectTransform bgRt = slot.background.rectTransform;
+            if (bgRt != null)
+            {
+                bgRt.sizeDelta = new Vector2(slotSize, slotSize);
+            }
+        }
+
+        if (slot.icon != null)
+        {
+            RectTransform iconRt = slot.icon.rectTransform;
+            if (iconRt != null)
+            {
+                iconRt.sizeDelta = new Vector2(iconSize, iconSize);
+            }
+        }
+    }
+
+    void NormalizeVisualSettings()
+    {
+        // Auto-migrate legacy scene values so old serialized data can't keep the hotbar tiny/white.
+        if (slotSize < MinRecommendedSlotSize) slotSize = MinRecommendedSlotSize;
+
+        int maxIcon = Mathf.Max(1, slotSize - 12);
+        if (iconSize <= 0 || iconSize > maxIcon)
+        {
+            iconSize = Mathf.Min(DefaultRecommendedIconSize, maxIcon);
+        }
+
+        if (IsNearlyWhite(normalColor))
+        {
+            normalColor = DefaultSlotNormalColor;
+        }
+
+        if (spacing < 0) spacing = 0;
+    }
+
+    bool IsNearlyWhite(Color c)
+    {
+        return c.a > 0.95f && c.r > 0.95f && c.g > 0.95f && c.b > 0.95f;
     }
 }
 
