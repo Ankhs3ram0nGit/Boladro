@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -22,6 +24,7 @@ public class MainMenuBootstrap : MonoBehaviour
 
     private readonly List<BehaviourState> suspendedBehaviours = new List<BehaviourState>(64);
     private readonly List<GameObjectState> hiddenObjects = new List<GameObjectState>(16);
+    private readonly List<GameObjectState> suspendedRootObjects = new List<GameObjectState>(64);
     private readonly List<GameObject> runtimeCreatedObjects = new List<GameObject>(24);
     private readonly List<Button> menuButtons = new List<Button>(16);
     private readonly List<Text> saveEntryLabels = new List<Text>(16);
@@ -110,6 +113,8 @@ public class MainMenuBootstrap : MonoBehaviour
         Time.timeScale = 0f;
         Time.fixedDeltaTime = previousFixedDeltaTime;
 
+        SuspendActiveSceneRoots();
+
         SuspendAllOfType<PlayerMover>();
         SuspendAllOfType<PlayerToolController>();
         SuspendAllOfType<TreeHoverSelector>();
@@ -119,6 +124,7 @@ public class MainMenuBootstrap : MonoBehaviour
         SuspendAllOfType<InventoryUI>();
         SuspendAllOfType<InventoryHotbar>();
         SuspendAllOfType<MiniMapController>();
+        SuspendAllOfType<SpawnManager>();
 
         HideNamedObject("HUD");
         HideNamedObject("GameOverUI");
@@ -129,6 +135,16 @@ public class MainMenuBootstrap : MonoBehaviour
     {
         if (!suspendedGameplay) return;
         suspendedGameplay = false;
+
+        for (int i = 0; i < suspendedRootObjects.Count; i++)
+        {
+            GameObjectState state = suspendedRootObjects[i];
+            if (state.target != null)
+            {
+                state.target.SetActive(state.wasActive);
+            }
+        }
+        suspendedRootObjects.Clear();
 
         for (int i = 0; i < suspendedBehaviours.Count; i++)
         {
@@ -152,6 +168,28 @@ public class MainMenuBootstrap : MonoBehaviour
 
         Time.timeScale = previousTimeScale;
         Time.fixedDeltaTime = previousFixedDeltaTime;
+    }
+
+    private void SuspendActiveSceneRoots()
+    {
+        Scene active = SceneManager.GetActiveScene();
+        if (!active.IsValid() || !active.isLoaded) return;
+
+        GameObject[] roots = active.GetRootGameObjects();
+        for (int i = 0; i < roots.Length; i++)
+        {
+            GameObject root = roots[i];
+            if (root == null) continue;
+            suspendedRootObjects.Add(new GameObjectState
+            {
+                target = root,
+                wasActive = root.activeSelf
+            });
+            if (root.activeSelf)
+            {
+                root.SetActive(false);
+            }
+        }
     }
 
     private void SuspendAllOfType<T>() where T : Behaviour
@@ -220,6 +258,8 @@ public class MainMenuBootstrap : MonoBehaviour
         canvasRect.offsetMin = Vector2.zero;
         canvasRect.offsetMax = Vector2.zero;
 
+        EnsureEventSystemExists();
+
         GameObject bgGo = CreateUiObject("Background", canvasRect);
         Image bg = bgGo.AddComponent<Image>();
         RectTransform bgRect = bgGo.GetComponent<RectTransform>();
@@ -230,7 +270,7 @@ public class MainMenuBootstrap : MonoBehaviour
             bg.sprite = menuArt;
             bg.color = Color.white;
             bg.type = Image.Type.Simple;
-            bg.preserveAspect = true;
+            bg.preserveAspect = false;
         }
         else
         {
@@ -576,5 +616,12 @@ public class MainMenuBootstrap : MonoBehaviour
         if (outline == null) outline = target.AddComponent<Outline>();
         outline.effectColor = color;
         outline.effectDistance = distance;
+    }
+
+    private void EnsureEventSystemExists()
+    {
+        if (EventSystem.current != null) return;
+        GameObject es = new GameObject("MainMenuEventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        runtimeCreatedObjects.Add(es);
     }
 }
