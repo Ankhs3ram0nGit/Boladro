@@ -10,7 +10,7 @@ public class PlayerCreatureParty : MonoBehaviour
     public class PartySlot
     {
         public string creatureID;
-        [Range(1, 99)] public int level = 5;
+        [Range(1, 100)] public int level = 5;
     }
 
     [Header("Party")]
@@ -21,7 +21,7 @@ public class PlayerCreatureParty : MonoBehaviour
     [Tooltip("Seeds a 6-creature party if none is configured.")]
     public bool seedSixUniqueCreaturesForTesting = true;
     [Range(1, 6)] public int testPartySize = 6;
-    [Range(1, 99)] public int testBaseLevel = 5;
+    [Range(1, 100)] public int testBaseLevel = 5;
     [Tooltip("Preferred IDs for test seeding. Missing IDs are ignored.")]
     public List<string> preferredTestCreatureIDs = new List<string>
     {
@@ -77,6 +77,11 @@ public class PlayerCreatureParty : MonoBehaviour
         int clamped = Mathf.Clamp(index, 0, Mathf.Max(0, activeCreatures.Count - 1));
         if (clamped == activePartyIndex) return;
         activePartyIndex = clamped;
+        PartyChanged?.Invoke();
+    }
+
+    public void NotifyPartyChanged()
+    {
         PartyChanged?.Invoke();
     }
 
@@ -221,7 +226,7 @@ public class PlayerCreatureParty : MonoBehaviour
                 configuredParty.Add(new PartySlot
                 {
                     creatureID = def.creatureID,
-                    level = Mathf.Clamp(testBaseLevel + configuredParty.Count, 1, 99)
+                    level = Mathf.Clamp(testBaseLevel + configuredParty.Count, 1, CreatureExperienceSystem.MaxLevel)
                 });
                 added.Add(canonical);
             }
@@ -241,7 +246,7 @@ public class PlayerCreatureParty : MonoBehaviour
             configuredParty.Add(new PartySlot
             {
                 creatureID = def.creatureID,
-                level = Mathf.Clamp(testBaseLevel + configuredParty.Count, 1, 99)
+                level = Mathf.Clamp(testBaseLevel + configuredParty.Count, 1, CreatureExperienceSystem.MaxLevel)
             });
             added.Add(canonical);
         }
@@ -266,7 +271,7 @@ public class PlayerCreatureParty : MonoBehaviour
             string canonical = CreatureRegistry.CanonicalizeCreatureID(slot.creatureID);
             if (!CreatureRegistry.TryGet(canonical, out CreatureDefinition def) || def == null) continue;
 
-            int level = Mathf.Clamp(slot.level, 1, 99);
+            int level = Mathf.Clamp(slot.level, 1, CreatureExperienceSystem.MaxLevel);
             CreatureInstance instance = CreatureInstanceFactory.CreateWild(def, level);
             instance.definitionID = def.creatureID;
             instance.ownerID = "player";

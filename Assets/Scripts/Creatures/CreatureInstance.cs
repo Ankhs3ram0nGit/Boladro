@@ -59,6 +59,7 @@ public class CreatureInstance
     public int currentHP = 1;
     public int[] currentPP = new int[4];
     public SoulTraitValues soulTraits;
+    public int totalExperience;
     public int totalBattles;
     public bool isShiny;
     public string capturedInZoneID;
@@ -89,6 +90,7 @@ public struct CreatureInstanceSaveData
     public int currentHP;
     public int[] currentPP;
     public SoulTraitValues soulTraits;
+    public int totalExperience;
     public int totalBattles;
     public bool isShiny;
     public string capturedInZoneID;

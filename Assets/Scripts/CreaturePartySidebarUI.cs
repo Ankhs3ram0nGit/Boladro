@@ -23,6 +23,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
         public Text nameText;
         public Text levelText;
         public Text hpText;
+        public RectTransform hpBarRect;
+        public RectTransform xpBarRect;
         public Image hpFill;
         public Image xpFill;
         public CreatureInstance instance;
@@ -405,9 +407,11 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.hpText = CreateOutlinedText("HP", view.infoRoot, 13, TextAnchor.MiddleRight, hpTextColor);
 
         Image hpBack = CreateBar("HPBarBG", view.infoRoot, hpBarBackColor, new Vector2(0f, 0.40f), new Vector2(1f, 0.58f));
+        view.hpBarRect = hpBack.rectTransform;
         view.hpFill = CreateFill(hpBack.transform as RectTransform, hpBarFillColor);
 
         Image xpBack = CreateBar("XPBarBG", view.infoRoot, xpBarBackColor, new Vector2(0f, 0.14f), new Vector2(1f, 0.28f));
+        view.xpBarRect = xpBack.rectTransform;
         view.xpFill = CreateFill(xpBack.transform as RectTransform, xpBarFillColor);
 
         return slot;
@@ -517,7 +521,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
         float hpRatio = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
         view.hpFill.fillAmount = hpRatio;
         view.hpFill.color = ResolveHpTierColor(view.hpFill.fillAmount);
-        view.xpFill.fillAmount = ComputeXpRatio(instance);
+        view.xpFill.fillAmount = ComputeXpRatio(instance, def);
+        view.xpFill.color = xpBarFillColor;
 
         view.glass.sprite = glassOverlaySprite;
         view.glass.type = glassOverlaySprite != null && glassOverlaySprite.border.sqrMagnitude > 0f
@@ -586,7 +591,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
             {
                 view.xpFill.sprite = GetNeutralFillSprite();
                 view.xpFill.material = null;
-                view.xpFill.fillAmount = ComputeXpRatio(instance);
+                view.xpFill.fillAmount = ComputeXpRatio(instance, def);
+                view.xpFill.color = xpBarFillColor;
             }
 
             if (view.background != null)
@@ -716,6 +722,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
             view.infoRoot.offsetMin = new Vector2(iconDims.x + 18f, 8f);
             view.infoRoot.offsetMax = new Vector2(-10f, -8f);
             view.infoRoot.gameObject.SetActive(view.expandT >= expandedInfoThreshold);
+            LayoutInfoBars(view);
 
             bool glassVisible = !view.isActive && !expandAllHeld;
             view.glass.enabled = glassVisible;
@@ -723,14 +730,34 @@ public class CreaturePartySidebarUI : MonoBehaviour
         }
     }
 
-    private float ComputeXpRatio(CreatureInstance instance)
+    private void LayoutInfoBars(PartySlotView view)
     {
-        if (instance == null) return 0f;
+        if (view == null || view.hpBarRect == null || view.xpBarRect == null || view.infoRoot == null) return;
 
-        int xpToLevel = Mathf.Max(20, instance.level * 12);
-        int accumulated = Mathf.Max(0, instance.totalBattles * 5);
-        int currentInLevel = accumulated % xpToLevel;
-        return Mathf.Clamp01((float)currentInLevel / xpToLevel);
+        const float hpHeight = 10f;
+        const float xpHeight = 5f;
+        const float xpGapFromHp = 2f;
+        const float hpBottom = 16f;
+
+        float xpBottom = hpBottom - xpHeight - xpGapFromHp;
+
+        LayoutInfoBarRect(view.hpBarRect, hpBottom, hpHeight);
+        LayoutInfoBarRect(view.xpBarRect, xpBottom, xpHeight);
+    }
+
+    private static void LayoutInfoBarRect(RectTransform rt, float bottom, float height)
+    {
+        if (rt == null) return;
+        rt.anchorMin = new Vector2(0f, 0f);
+        rt.anchorMax = new Vector2(1f, 0f);
+        rt.pivot = new Vector2(0.5f, 0f);
+        rt.offsetMin = new Vector2(0f, bottom);
+        rt.offsetMax = new Vector2(0f, bottom + height);
+    }
+
+    private float ComputeXpRatio(CreatureInstance instance, CreatureDefinition definition)
+    {
+        return CreatureExperienceSystem.GetLevelProgress01(instance, definition);
     }
 
     private Sprite GetNeutralFillSprite()

@@ -67,6 +67,21 @@ public class BattleSystem : MonoBehaviour
     public Sprite swapCardGlassSprite;
     public Sprite swapExitIconSprite;
 
+    [Header("XP Rewards")]
+    [Min(1)] public int battleWinBaseXp = 40;
+    [Min(0f)] public float battleWinPerEnemyLevel = 14f;
+    [Min(0.1f)] public float rareBattleXpMultiplier = 1.15f;
+    [Min(0.1f)] public float eliteBattleXpMultiplier = 1.30f;
+    [Min(0.1f)] public float legendaryBattleXpMultiplier = 1.55f;
+
+    [Header("Battle XP Orb VFX")]
+    [Min(0f)] public float battleXpOrbStagger = 0.08f;
+    [Min(0.01f)] public float battleXpOrbMoveDuration = 0.20f;
+    [Min(0.01f)] public float battleXpOrbExpandDuration = 0.08f;
+    [Min(0.01f)] public float battleXpOrbShrinkDuration = 0.10f;
+    [Min(0f)] public float battleXpOrbArcHeight = 34f;
+    [Min(0f)] public float battleXpOrbTargetYOffset = 0f;
+
     private PlayerMover playerMover;
     private PlayerHealth playerHealth;
     private WildCreatureAI currentEnemyAI;
@@ -119,6 +134,7 @@ public class BattleSystem : MonoBehaviour
     private Vector3 enemySpriteBaseLocalScale = Vector3.one;
     private bool playerFaintedVisualLocked;
     private bool enemyFaintedVisualLocked;
+    private readonly HashSet<CreatureInstance> battleParticipants = new HashSet<CreatureInstance>();
     private static readonly Color HpGreen = new Color(0.20f, 0.82f, 0.24f, 1f);
     private static readonly Color HpYellow = new Color(0.97f, 0.88f, 0.20f, 1f);
     private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
@@ -150,6 +166,7 @@ public class BattleSystem : MonoBehaviour
         turnResolutionInProgress = false;
         playerFaintedVisualLocked = false;
         enemyFaintedVisualLocked = false;
+        battleParticipants.Clear();
         IsEngagedBattleActive = false;
     }
 
@@ -157,6 +174,7 @@ public class BattleSystem : MonoBehaviour
     {
         IsEngagedBattleActive = false;
         swapMenuOpen = false;
+        battleParticipants.Clear();
         if (swapMenuRoot != null) swapMenuRoot.SetActive(false);
     }
 
@@ -883,6 +901,7 @@ public class BattleSystem : MonoBehaviour
         inBattle = true;
         IsEngagedBattleActive = true;
         waitingForPlayerMove = true;
+        battleParticipants.Clear();
         playerFaintedVisualLocked = false;
         enemyFaintedVisualLocked = false;
         hudWasHiddenForBattle = false;
@@ -912,6 +931,7 @@ public class BattleSystem : MonoBehaviour
             string playerId = ResolveCreatureID(playerCreature.gameObject, playerCreature);
             // Preserve party creature HP/PP across battle sessions.
             ConfigureCombatantByCreatureID(playerCreature, playerId, Mathf.Max(1, playerCreature.level), false);
+            TryMarkBattleParticipant(playerCreature);
         }
         else
         {
@@ -1090,6 +1110,7 @@ public class BattleSystem : MonoBehaviour
         playerFaintedVisualLocked = false;
         enemyFaintedVisualLocked = false;
         guaranteedDodgeCharges.Clear();
+        battleParticipants.Clear();
 
         if (battleRoot != null) battleRoot.SetActive(false);
         if (movePanel != null) movePanel.SetActive(false);
@@ -1510,6 +1531,7 @@ public class BattleSystem : MonoBehaviour
 
         Image xpBack = CreateSwapBar("XPBarBG", infoRoot, new Color(0f, 0f, 0f, 0.50f), new Vector2(0f, 0.11f), new Vector2(1f, 0.27f));
         Image xpFill = CreateSwapFill(xpBack.rectTransform, new Color(0.28f, 0.75f, 1f, 1f));
+        LayoutSwapBarPair(hpBack.rectTransform, xpBack.rectTransform);
 
         GameObject glassGo = new GameObject("Glass", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
         glassGo.transform.SetParent(slot.transform, false);
@@ -1622,6 +1644,30 @@ public class BattleSystem : MonoBehaviour
         return img;
     }
 
+    void LayoutSwapBarPair(RectTransform hpBar, RectTransform xpBar)
+    {
+        if (hpBar == null || xpBar == null) return;
+
+        const float hpHeight = 10f;
+        const float xpHeight = 5f;
+        const float xpGapFromHp = 2f;
+        const float hpBottom = 17f;
+
+        float xpBottom = hpBottom - xpHeight - xpGapFromHp;
+        LayoutSwapBarRect(hpBar, hpBottom, hpHeight);
+        LayoutSwapBarRect(xpBar, xpBottom, xpHeight);
+    }
+
+    static void LayoutSwapBarRect(RectTransform rt, float bottom, float height)
+    {
+        if (rt == null) return;
+        rt.anchorMin = new Vector2(0f, 0f);
+        rt.anchorMax = new Vector2(1f, 0f);
+        rt.pivot = new Vector2(0.5f, 0f);
+        rt.offsetMin = new Vector2(0f, bottom);
+        rt.offsetMax = new Vector2(0f, bottom + height);
+    }
+
     void RefreshSwapMenuCards()
     {
         EnsurePlayerPartySource();
@@ -1697,7 +1743,11 @@ public class BattleSystem : MonoBehaviour
                 view.hpFill.fillAmount = hpRatio;
                 view.hpFill.color = ResolveHpTierColor(hpRatio);
             }
-            if (view.xpFill != null) view.xpFill.fillAmount = ComputeSwapXpRatio(inst);
+            if (view.xpFill != null)
+            {
+                view.xpFill.fillAmount = ComputeSwapXpRatio(inst);
+                view.xpFill.color = new Color(0.28f, 0.75f, 1f, 1f);
+            }
 
             if (view.glass != null)
             {
@@ -1712,10 +1762,271 @@ public class BattleSystem : MonoBehaviour
     float ComputeSwapXpRatio(CreatureInstance instance)
     {
         if (instance == null) return 0f;
-        int xpToLevel = Mathf.Max(20, instance.level * 12);
-        int accumulated = Mathf.Max(0, instance.totalBattles * 5);
-        int currentInLevel = accumulated % xpToLevel;
-        return Mathf.Clamp01((float)currentInLevel / xpToLevel);
+        CreatureDefinition def = CreatureRegistry.Get(instance.definitionID);
+        return CreatureExperienceSystem.GetLevelProgress01(instance, def);
+    }
+
+    void TryMarkBattleParticipant(CreatureCombatant combatant)
+    {
+        if (!inBattle || combatant == null || combatant.Instance == null) return;
+
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null) return;
+
+        CreatureInstance candidate = combatant.Instance;
+        for (int i = 0; i < playerParty.ActiveCreatures.Count; i++)
+        {
+            if (ReferenceEquals(playerParty.ActiveCreatures[i], candidate))
+            {
+                battleParticipants.Add(candidate);
+                return;
+            }
+        }
+    }
+
+    List<CreatureInstance> ResolveBattleXpRecipients()
+    {
+        List<CreatureInstance> recipients = new List<CreatureInstance>();
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null) return recipients;
+
+        for (int i = 0; i < playerParty.ActiveCreatures.Count; i++)
+        {
+            CreatureInstance inst = playerParty.ActiveCreatures[i];
+            if (inst == null) continue;
+            if (battleParticipants.Contains(inst))
+            {
+                recipients.Add(inst);
+            }
+        }
+
+        if (recipients.Count == 0 && playerCreature != null && playerCreature.Instance != null)
+        {
+            for (int i = 0; i < playerParty.ActiveCreatures.Count; i++)
+            {
+                if (ReferenceEquals(playerParty.ActiveCreatures[i], playerCreature.Instance))
+                {
+                    recipients.Add(playerCreature.Instance);
+                    break;
+                }
+            }
+        }
+
+        return recipients;
+    }
+
+    float ResolveBattleXpRarityMultiplier(CreatureDefinition enemyDef)
+    {
+        if (enemyDef == null) return 1f;
+
+        switch (enemyDef.rarityTier)
+        {
+            case CreatureRarity.Legendary:
+                return Mathf.Max(0.1f, legendaryBattleXpMultiplier);
+            case CreatureRarity.Elite:
+                return Mathf.Max(0.1f, eliteBattleXpMultiplier);
+            case CreatureRarity.Rare:
+                return Mathf.Max(0.1f, rareBattleXpMultiplier);
+            case CreatureRarity.Uncommon:
+                return 1.05f;
+            default:
+                return 1f;
+        }
+    }
+
+    int CalculateBattleWinXp()
+    {
+        int enemyLevel = enemyCreature != null ? Mathf.Max(1, enemyCreature.level) : 1;
+        CreatureDefinition enemyDef = enemyCreature != null ? enemyCreature.Definition : null;
+        float rarityMultiplier = ResolveBattleXpRarityMultiplier(enemyDef);
+        float baseXp = Mathf.Max(1, battleWinBaseXp) + Mathf.Max(0f, battleWinPerEnemyLevel) * enemyLevel;
+        return Mathf.Max(1, Mathf.RoundToInt(baseXp * rarityMultiplier));
+    }
+
+    IEnumerator ResolveBattleVictoryRewards()
+    {
+        List<CreatureInstance> recipients = ResolveBattleXpRecipients();
+        if (recipients.Count == 0) yield break;
+
+        int xpPerRecipient = CalculateBattleWinXp();
+        Vector2 orbStart = ResolveBattleOrbLocalPoint(enemySpriteImage != null ? enemySpriteImage.rectTransform : null, new Vector2(0f, 20f));
+
+        for (int i = 0; i < recipients.Count; i++)
+        {
+            CreatureInstance inst = recipients[i];
+            if (inst == null) continue;
+
+            CreatureDefinition def = CreatureRegistry.Get(inst.definitionID);
+            if (def == null) continue;
+
+            Vector2 orbTarget = ResolveBattleOrbLocalPoint(playerXpBg != null ? playerXpBg.rectTransform : null, new Vector2(0f, battleXpOrbTargetYOffset));
+            SpawnBattleXpOrb(orbStart, orbTarget, i * Mathf.Max(0f, battleXpOrbStagger));
+
+            ExperienceGainResult gain = CreatureExperienceSystem.AddExperience(inst, def, xpPerRecipient);
+            if (ReferenceEquals(playerCreature != null ? playerCreature.Instance : null, inst))
+            {
+                ApplyInstanceProgressionToCombatant(playerCreature, def, inst);
+            }
+
+            if (gain.experienceGranted > 0)
+            {
+                SetMessage(inst.DisplayName + " gained " + gain.experienceGranted + " XP!");
+                UpdateUI();
+                RefreshSwapMenuCards();
+                yield return new WaitForSeconds(Mathf.Max(0.2f, actionPhaseDelay * 0.8f));
+            }
+
+            if (gain.leveledUp)
+            {
+                SetMessage(inst.DisplayName + " grew to Lv " + gain.newLevel + "!");
+                UpdateUI();
+                RefreshSwapMenuCards();
+                yield return new WaitForSeconds(Mathf.Max(0.55f, actionNarrationDelay * 0.72f));
+            }
+        }
+
+        if (playerParty != null)
+        {
+            playerParty.NotifyPartyChanged();
+        }
+
+        float settle = battleXpOrbMoveDuration + battleXpOrbExpandDuration + battleXpOrbShrinkDuration + (Mathf.Max(0, recipients.Count - 1) * Mathf.Max(0f, battleXpOrbStagger));
+        yield return new WaitForSeconds(Mathf.Clamp(settle, 0.12f, 1.2f));
+    }
+
+    void ApplyInstanceProgressionToCombatant(CreatureCombatant combatant, CreatureDefinition def, CreatureInstance inst)
+    {
+        if (combatant == null || def == null || inst == null) return;
+
+        combatant.level = Mathf.Clamp(inst.level, 1, CreatureExperienceSystem.MaxLevel);
+        combatant.creatureName = string.IsNullOrWhiteSpace(inst.DisplayName) ? def.displayName : inst.DisplayName;
+
+        CreatureStats stats = combatant.GetFinalStats();
+        combatant.maxHP = Mathf.Max(1, stats.maxHP);
+        combatant.attack = Mathf.Max(1, stats.attack);
+        combatant.defense = Mathf.Max(1, stats.defense);
+        combatant.speed = Mathf.Max(1, stats.speed);
+        combatant.currentHP = Mathf.Clamp(inst.currentHP, 0, combatant.maxHP);
+        combatant.SyncInstanceRuntimeState();
+    }
+
+    Vector2 ResolveBattleOrbLocalPoint(RectTransform source, Vector2 offset)
+    {
+        RectTransform rootRt = battleRoot != null ? battleRoot.GetComponent<RectTransform>() : null;
+        if (rootRt == null || source == null)
+        {
+            return offset;
+        }
+
+        Vector3 world = source.TransformPoint(source.rect.center);
+        Vector2 screen = RectTransformUtility.WorldToScreenPoint(null, world);
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(rootRt, screen, null, out Vector2 local))
+        {
+            return local + offset;
+        }
+
+        return offset;
+    }
+
+    void SpawnBattleXpOrb(Vector2 start, Vector2 target, float startDelay)
+    {
+        if (battleRoot == null) return;
+        RectTransform parent = battleRoot.GetComponent<RectTransform>();
+        if (parent == null) return;
+
+        GameObject root = new GameObject("BattleXPOrb", typeof(RectTransform), typeof(CanvasRenderer));
+        root.transform.SetParent(parent, false);
+        RectTransform rootRt = root.GetComponent<RectTransform>();
+        rootRt.anchorMin = new Vector2(0.5f, 0.5f);
+        rootRt.anchorMax = new Vector2(0.5f, 0.5f);
+        rootRt.pivot = new Vector2(0.5f, 0.5f);
+        rootRt.sizeDelta = new Vector2(14f, 14f);
+        rootRt.anchoredPosition = start;
+        rootRt.localScale = Vector3.one;
+        rootRt.SetAsLastSibling();
+
+        Image glow = new GameObject("Glow", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image)).GetComponent<Image>();
+        glow.transform.SetParent(rootRt, false);
+        RectTransform glowRt = glow.rectTransform;
+        glowRt.anchorMin = new Vector2(0.5f, 0.5f);
+        glowRt.anchorMax = new Vector2(0.5f, 0.5f);
+        glowRt.pivot = new Vector2(0.5f, 0.5f);
+        glowRt.sizeDelta = new Vector2(22f, 22f);
+        glow.sprite = ExperienceOrbVisuals.GlowSprite;
+        glow.color = new Color(0.22f, 0.74f, 1f, 0.45f);
+        glow.raycastTarget = false;
+
+        Image core = new GameObject("Core", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image)).GetComponent<Image>();
+        core.transform.SetParent(rootRt, false);
+        RectTransform coreRt = core.rectTransform;
+        coreRt.anchorMin = new Vector2(0.5f, 0.5f);
+        coreRt.anchorMax = new Vector2(0.5f, 0.5f);
+        coreRt.pivot = new Vector2(0.5f, 0.5f);
+        coreRt.sizeDelta = new Vector2(10f, 10f);
+        core.sprite = ExperienceOrbVisuals.CoreSprite;
+        core.color = new Color(0.43f, 0.86f, 1f, 1f);
+        core.raycastTarget = false;
+
+        StartCoroutine(AnimateBattleXpOrb(rootRt, start, target, Mathf.Max(0f, startDelay)));
+    }
+
+    IEnumerator AnimateBattleXpOrb(RectTransform orbRt, Vector2 start, Vector2 target, float startDelay)
+    {
+        if (orbRt == null) yield break;
+
+        if (startDelay > 0f)
+        {
+            yield return new WaitForSeconds(startDelay);
+            if (orbRt == null) yield break;
+        }
+
+        float moveDuration = Mathf.Max(0.01f, battleXpOrbMoveDuration);
+        float expandDuration = Mathf.Max(0.01f, battleXpOrbExpandDuration);
+        float shrinkDuration = Mathf.Max(0.01f, battleXpOrbShrinkDuration);
+        const float expandScale = 1.35f;
+
+        float t = 0f;
+        while (t < moveDuration)
+        {
+            if (orbRt == null) yield break;
+            t += Time.deltaTime;
+            float u = Mathf.Clamp01(t / moveDuration);
+            float eased = 1f - Mathf.Pow(1f - u, 3f);
+            Vector2 pos = Vector2.Lerp(start, target, eased);
+            pos.y += Mathf.Sin(u * Mathf.PI) * Mathf.Max(0f, battleXpOrbArcHeight);
+            orbRt.anchoredPosition = pos;
+            yield return null;
+        }
+
+        if (orbRt == null) yield break;
+        orbRt.anchoredPosition = target;
+
+        t = 0f;
+        while (t < expandDuration)
+        {
+            if (orbRt == null) yield break;
+            t += Time.deltaTime;
+            float u = Mathf.Clamp01(t / expandDuration);
+            float s = Mathf.Lerp(1f, expandScale, u);
+            orbRt.localScale = new Vector3(s, s, 1f);
+            yield return null;
+        }
+
+        t = 0f;
+        while (t < shrinkDuration)
+        {
+            if (orbRt == null) yield break;
+            t += Time.deltaTime;
+            float u = Mathf.Clamp01(t / shrinkDuration);
+            float s = Mathf.Lerp(expandScale, 0f, u);
+            orbRt.localScale = new Vector3(s, s, 1f);
+            yield return null;
+        }
+
+        if (orbRt != null)
+        {
+            Destroy(orbRt.gameObject);
+        }
     }
 
     int ResolveActivePartyIndexForCurrentBattleCreature(int countLimit)
@@ -1831,6 +2142,7 @@ public class BattleSystem : MonoBehaviour
         if (playerCreature != null)
         {
             playerCreature.SyncInstanceRuntimeState();
+            TryMarkBattleParticipant(playerCreature);
         }
 
         playerParty.SetActivePartyIndex(swapSlotIndex);
@@ -2060,6 +2372,7 @@ public class BattleSystem : MonoBehaviour
         yield return PerformAttack(playerCreature, enemyCreature, playerAttack);
         if (enemyCreature.currentHP <= 0)
         {
+            yield return StartCoroutine(ResolveBattleVictoryRewards());
             turnResolutionInProgress = false;
             EndBattle(true);
             yield break;
@@ -2127,6 +2440,7 @@ public class BattleSystem : MonoBehaviour
     IEnumerator PerformAttack(CreatureCombatant attacker, CreatureCombatant defender, AttackData atk)
     {
         if (attacker == null || defender == null || atk == null) yield break;
+        TryMarkBattleParticipant(attacker);
 
         Image attackerImage = GetSpriteImageForCombatant(attacker);
         Image defenderImage = GetSpriteImageForCombatant(defender);
@@ -2582,7 +2896,11 @@ public class BattleSystem : MonoBehaviour
             if (playerHpText != null) playerHpText.text = playerCreature.currentHP + " / " + playerCreature.maxHP;
             float playerHpRatio = playerCreature.maxHP > 0 ? (float)playerCreature.currentHP / playerCreature.maxHP : 0f;
             ApplyHpFillVisual(playerHpFill, playerHpRatio);
-            if (playerXpFill != null) playerXpFill.fillAmount = ComputeSwapXpRatio(playerCreature.Instance);
+            if (playerXpFill != null)
+            {
+                playerXpFill.fillAmount = ComputeSwapXpRatio(playerCreature.Instance);
+                playerXpFill.color = new Color(0.28f, 0.75f, 1f, 1f);
+            }
         }
         else
         {
@@ -3193,11 +3511,37 @@ public class BattleSystem : MonoBehaviour
 
         playerXpBg = bgTf.GetComponent<Image>();
         RectTransform bgRt = playerXpBg.rectTransform;
-        bgRt.anchorMin = new Vector2(0.08f, 0.07f);
-        bgRt.anchorMax = new Vector2(0.88f, 0.14f);
-        bgRt.pivot = new Vector2(0.5f, 0.5f);
-        bgRt.offsetMin = Vector2.zero;
-        bgRt.offsetMax = Vector2.zero;
+        bool laidOutFromHp = false;
+        if (playerHpBg != null && playerHpBg.rectTransform != null)
+        {
+            RectTransform hpRt = playerHpBg.rectTransform;
+            Vector3[] hpCorners = new Vector3[4];
+            hpRt.GetWorldCorners(hpCorners);
+            Vector3 hpBottomLeft = playerBar.InverseTransformPoint(hpCorners[0]);
+            Vector3 hpTopRight = playerBar.InverseTransformPoint(hpCorners[2]);
+
+            float hpWidth = Mathf.Max(8f, hpTopRight.x - hpBottomLeft.x);
+            float hpHeight = Mathf.Max(4f, hpTopRight.y - hpBottomLeft.y);
+            float xpHeight = Mathf.Clamp(hpHeight * 0.45f, 3f, hpHeight);
+            float xpTop = hpBottomLeft.y - 2f;
+            float xpBottom = xpTop - xpHeight;
+
+            bgRt.anchorMin = new Vector2(0.5f, 0.5f);
+            bgRt.anchorMax = new Vector2(0.5f, 0.5f);
+            bgRt.pivot = new Vector2(0.5f, 0.5f);
+            bgRt.anchoredPosition = new Vector2(hpBottomLeft.x + hpWidth * 0.5f, xpBottom + xpHeight * 0.5f);
+            bgRt.sizeDelta = new Vector2(hpWidth, xpHeight);
+            laidOutFromHp = true;
+        }
+
+        if (!laidOutFromHp)
+        {
+            bgRt.anchorMin = new Vector2(0.08f, 0.07f);
+            bgRt.anchorMax = new Vector2(0.88f, 0.14f);
+            bgRt.pivot = new Vector2(0.5f, 0.5f);
+            bgRt.offsetMin = Vector2.zero;
+            bgRt.offsetMax = Vector2.zero;
+        }
         playerXpBg.raycastTarget = false;
         playerXpBg.sprite = GetNeutralFillSprite();
         playerXpBg.type = Image.Type.Simple;

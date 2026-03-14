@@ -175,6 +175,7 @@ public class CreatureCombatant : MonoBehaviour
         definition = def;
         instance = inst;
         autoInitWhelpling = false;
+        CreatureExperienceSystem.EnsureExperienceBaseline(instance, definition);
 
         level = Mathf.Max(1, inst.level);
         creatureName = string.IsNullOrWhiteSpace(inst.DisplayName) ? def.displayName : inst.DisplayName;

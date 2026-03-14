@@ -118,6 +118,11 @@ public class CreatureDefinition : ScriptableObject
     public float defPerLevel = 1f;
     public float spdPerLevel = 1f;
 
+    [Header("Progression")]
+    [Tooltip("Scales this creature's total XP curve. 1.0 = standard curve; legendary creatures also apply an extra 1.5x internally.")]
+    [Min(0.1f)]
+    public float experienceCurveMultiplier = 1f;
+
     [Header("Moves")]
     [Tooltip("Move unlocked at level 1.")]
     public MoveDefinition moveSlot1;
@@ -176,6 +181,7 @@ public class CreatureDefinition : ScriptableObject
         if (baseAttack < 1) baseAttack = 1;
         if (baseDefense < 1) baseDefense = 1;
         if (baseSpeed < 1) baseSpeed = 1;
+        if (experienceCurveMultiplier < 0.1f) experienceCurveMultiplier = 0.1f;
     }
 
     public CreatureType[] GetAllTypes()

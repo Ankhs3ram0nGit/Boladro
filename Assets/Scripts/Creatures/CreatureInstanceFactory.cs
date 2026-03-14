@@ -13,14 +13,16 @@ public static class CreatureInstanceFactory
         instance.ownerID = string.Empty;
         instance.ownershipState = OwnershipState.Wild;
         instance.nickname = string.Empty;
-        instance.level = Mathf.Max(1, level);
+        instance.level = Mathf.Clamp(level, 1, CreatureExperienceSystem.MaxLevel);
         instance.soulTraits = RollSoulTraits();
+        instance.totalExperience = CreatureExperienceSystem.GetTotalXpForLevel(instance.level, def);
         instance.totalBattles = 0;
         instance.isShiny = false;
         instance.familiarityTier = FamiliarityTier.None;
         instance.captureTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         instance.currentPP = BuildStartingPP(def);
         instance.currentHP = ComputeMaxHP(def, instance.soulTraits, instance.level);
+        CreatureExperienceSystem.EnsureExperienceBaseline(instance, def);
         return instance;
     }
 
@@ -32,7 +34,7 @@ public static class CreatureInstanceFactory
         instance.ownerID = data.ownerID ?? string.Empty;
         instance.ownershipState = data.ownershipState;
         instance.nickname = data.nickname;
-        instance.level = Mathf.Max(1, data.level);
+        instance.level = Mathf.Clamp(data.level, 1, CreatureExperienceSystem.MaxLevel);
         instance.currentHP = Mathf.Max(0, data.currentHP);
         instance.currentPP = data.currentPP != null ? (int[])data.currentPP.Clone() : new int[4];
         if (instance.currentPP.Length < 4)
@@ -40,11 +42,15 @@ public static class CreatureInstanceFactory
             Array.Resize(ref instance.currentPP, 4);
         }
         instance.soulTraits = ClampSoulTraits(data.soulTraits);
+        instance.totalExperience = Mathf.Max(0, data.totalExperience);
         instance.totalBattles = Mathf.Max(0, data.totalBattles);
         instance.isShiny = data.isShiny;
         instance.capturedInZoneID = data.capturedInZoneID;
         instance.captureTimestamp = data.captureTimestamp;
         instance.familiarityTier = data.familiarityTier;
+
+        CreatureDefinition def = CreatureRegistry.Get(instance.definitionID);
+        CreatureExperienceSystem.EnsureExperienceBaseline(instance, def);
         return instance;
     }
 
