@@ -7,7 +7,7 @@ using UnityEngine.InputSystem.UI;
 public class InventoryUI : MonoBehaviour
 {
     const int MinRecommendedSlotSize = 90;
-    const int DefaultRecommendedIconSize = 75;
+    const int DefaultRecommendedIconSize = 80;
     static readonly Color DefaultSlotNormalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
 
     public InventoryModel inventory;
@@ -15,7 +15,7 @@ public class InventoryUI : MonoBehaviour
     public RectTransform bagRoot;
     public RectTransform panelRoot;
     public int slotSize = 90;
-    public int iconSize = 75;
+    public int iconSize = 80;
     public int spacing = 2;
     public Sprite slotSprite;
     public Sprite selectedSprite;
@@ -37,8 +37,7 @@ public class InventoryUI : MonoBehaviour
         if (hotbarRoot == null) hotbarRoot = transform.Find("Hotbar") as RectTransform;
         if (bagRoot == null && panelRoot != null) bagRoot = panelRoot.Find("BagGrid") as RectTransform;
 
-        if (slotSprite == null) slotSprite = CreateSlotSprite(new Color32(42, 42, 42, 255), new Color32(150, 150, 150, 255));
-        if (selectedSprite == null) selectedSprite = CreateSlotSprite(new Color32(80, 80, 40, 255), new Color32(255, 215, 90, 255));
+        EnsureSlotSprites();
 
         BuildUI();
         Refresh();
@@ -121,11 +120,10 @@ public class InventoryUI : MonoBehaviour
     {
         NormalizeVisualSettings();
         if (inventory == null) return;
-        if (hotbarRoot == null || bagRoot == null) return;
+        if (hotbarRoot == null) return;
         inventory.EnsureSlots();
 
         EnsureLayout(hotbarRoot, true);
-        EnsureLayout(bagRoot, false);
 
         if (hotbarRoot != null)
         {
@@ -138,7 +136,11 @@ public class InventoryUI : MonoBehaviour
         }
 
         hotbarSlots = BuildSlotRow(hotbarRoot, inventory.hotbar.Length, true);
-        bagSlots = BuildSlotGrid(bagRoot, inventory.bag.Length, inventory.bagColumns);
+        if (bagRoot != null)
+        {
+            EnsureLayout(bagRoot, false);
+            bagSlots = BuildSlotGrid(bagRoot, inventory.bag.Length, inventory.bagColumns);
+        }
 
         if (panelRoot != null)
         {
@@ -462,7 +464,7 @@ public class InventoryUI : MonoBehaviour
         // Auto-migrate legacy scene values so old serialized data can't keep the hotbar tiny/white.
         if (slotSize < MinRecommendedSlotSize) slotSize = MinRecommendedSlotSize;
 
-        int maxIcon = Mathf.Max(1, slotSize - 12);
+        int maxIcon = Mathf.Max(1, slotSize - 8);
         if (iconSize <= 0 || iconSize > maxIcon)
         {
             iconSize = Mathf.Min(DefaultRecommendedIconSize, maxIcon);
@@ -474,12 +476,26 @@ public class InventoryUI : MonoBehaviour
         }
 
         if (spacing < 0) spacing = 0;
+        EnsureSlotSprites();
     }
 
     bool IsNearlyWhite(Color c)
     {
         return c.a > 0.95f && c.r > 0.95f && c.g > 0.95f && c.b > 0.95f;
     }
+
+    void EnsureSlotSprites()
+    {
+        if (slotSprite == null) slotSprite = CreateSlotSprite(new Color32(42, 42, 42, 255), new Color32(150, 150, 150, 255));
+        if (selectedSprite == null) selectedSprite = CreateSlotSprite(new Color32(80, 80, 40, 255), new Color32(255, 215, 90, 255));
+    }
+
+#if UNITY_EDITOR
+    void OnValidate()
+    {
+        NormalizeVisualSettings();
+    }
+#endif
 }
 
 public class InventorySlotUI : MonoBehaviour, IPointerDownHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler

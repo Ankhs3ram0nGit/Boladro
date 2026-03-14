@@ -6,7 +6,7 @@ public class InventoryHotbar : MonoBehaviour
 {
     public int slotCount = 5;
     public int slotSize = 90;
-    public int iconSize = 75;
+    public int iconSize = 80;
     public int spacing = 6;
     public int selectedIndex = 0;
     public Color normalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
@@ -18,9 +18,7 @@ public class InventoryHotbar : MonoBehaviour
 
     void Awake()
     {
-#if UNITY_EDITOR
         EnsureSprites();
-#endif
         BuildIfNeeded();
         ApplySelection();
     }
@@ -111,6 +109,7 @@ public class InventoryHotbar : MonoBehaviour
                 Image img = slot.AddComponent<Image>();
                 img.raycastTarget = false;
                 img.sprite = slotSprite;
+                img.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
                 RectTransform rt = slot.GetComponent<RectTransform>();
                 rt.sizeDelta = new Vector2(slotSize, slotSize);
             }
@@ -136,10 +135,12 @@ public class InventoryHotbar : MonoBehaviour
             if (selected && selectedSprite != null)
             {
                 slots[i].sprite = selectedSprite;
+                slots[i].type = selectedSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
             }
             else if (slotSprite != null)
             {
                 slots[i].sprite = slotSprite;
+                slots[i].type = slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
             }
         }
     }
@@ -180,9 +181,9 @@ public class InventoryHotbar : MonoBehaviour
         iconImage.color = Color.white;
     }
 
-#if UNITY_EDITOR
     void EnsureSprites()
     {
+#if UNITY_EDITOR
         if (slotSprite == null)
         {
             slotSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
@@ -193,11 +194,41 @@ public class InventoryHotbar : MonoBehaviour
             selectedSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
                 "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_FrameSlot01c.png");
         }
+#endif
+
+        // Runtime/editor-safe fallback so empty slots are never plain white.
+        if (slotSprite == null)
+        {
+            slotSprite = CreateSlotSprite(new Color32(42, 42, 42, 255), new Color32(150, 150, 150, 255));
+        }
+        if (selectedSprite == null)
+        {
+            selectedSprite = CreateSlotSprite(new Color32(80, 80, 40, 255), new Color32(255, 215, 90, 255));
+        }
     }
 
     void OnValidate()
     {
         EnsureSprites();
     }
-#endif
+
+    Sprite CreateSlotSprite(Color32 fill, Color32 border)
+    {
+        const int size = 16;
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Point;
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                bool edge = x == 0 || y == 0 || x == size - 1 || y == size - 1;
+                tex.SetPixel(x, y, edge ? border : fill);
+            }
+        }
+
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 16);
+    }
 }
