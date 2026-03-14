@@ -179,6 +179,7 @@ public class InventoryHotbar : MonoBehaviour
 
         iconImage.sprite = icon;
         iconImage.color = Color.white;
+        iconImage.enabled = icon != null;
     }
 
     void EnsureSprites()

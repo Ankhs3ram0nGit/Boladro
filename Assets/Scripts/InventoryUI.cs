@@ -9,6 +9,7 @@ public class InventoryUI : MonoBehaviour
     const int MinRecommendedSlotSize = 90;
     const int DefaultRecommendedIconSize = 80;
     static readonly Color DefaultSlotNormalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
+    static readonly Color DefaultEmptySlotFillColor = new Color(0f, 0f, 0f, 0.45f);
 
     public InventoryModel inventory;
     public RectTransform hotbarRoot;
@@ -21,6 +22,8 @@ public class InventoryUI : MonoBehaviour
     public Sprite selectedSprite;
     public Color normalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
     public Color selectedColor = new Color(1f, 1f, 0.8f, 1f);
+    public Color emptySlotFillColor = new Color(0f, 0f, 0f, 0.45f);
+    public int slotInnerPadding = 6;
     public int selectedHotbarIndex = 0;
 
     private InventorySlotUI[] hotbarSlots;
@@ -231,10 +234,22 @@ public class InventoryUI : MonoBehaviour
         RectTransform rt = slotObj.GetComponent<RectTransform>();
         rt.sizeDelta = new Vector2(slotSize, slotSize);
 
+        GameObject fillObj = new GameObject("Fill");
+        fillObj.transform.SetParent(slotObj.transform, false);
+        Image fill = fillObj.AddComponent<Image>();
+        fill.raycastTarget = false;
+        fill.sprite = CreateSolidSprite();
+        fill.color = emptySlotFillColor;
+        RectTransform frt = fillObj.GetComponent<RectTransform>();
+        frt.anchorMin = new Vector2(0f, 0f);
+        frt.anchorMax = new Vector2(1f, 1f);
+        frt.pivot = new Vector2(0.5f, 0.5f);
+
         GameObject iconObj = new GameObject("Icon");
         iconObj.transform.SetParent(slotObj.transform, false);
         Image icon = iconObj.AddComponent<Image>();
         icon.raycastTarget = false;
+        icon.preserveAspect = true;
         RectTransform irt = iconObj.GetComponent<RectTransform>();
         irt.anchorMin = new Vector2(0.5f, 0.5f);
         irt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -259,6 +274,7 @@ public class InventoryUI : MonoBehaviour
         slotUi.isHotbar = isHotbar;
         slotUi.index = index;
         slotUi.background = bg;
+        slotUi.fill = fill;
         slotUi.icon = icon;
         slotUi.countText = countText;
 
@@ -437,6 +453,24 @@ public class InventoryUI : MonoBehaviour
         return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 16);
     }
 
+    Sprite CreateSolidSprite()
+    {
+        const int size = 2;
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Point;
+        tex.wrapMode = TextureWrapMode.Clamp;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                tex.SetPixel(x, y, Color.white);
+            }
+        }
+
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
+    }
+
     void ResizeSlotVisuals(InventorySlotUI slot)
     {
         if (slot == null) return;
@@ -446,6 +480,18 @@ public class InventoryUI : MonoBehaviour
             if (bgRt != null)
             {
                 bgRt.sizeDelta = new Vector2(slotSize, slotSize);
+            }
+        }
+
+        if (slot.fill != null)
+        {
+            slot.fill.color = emptySlotFillColor;
+            RectTransform fillRt = slot.fill.rectTransform;
+            if (fillRt != null)
+            {
+                int padding = Mathf.Clamp(slotInnerPadding, 0, slotSize / 2);
+                fillRt.offsetMin = new Vector2(padding, padding);
+                fillRt.offsetMax = new Vector2(-padding, -padding);
             }
         }
 
@@ -476,6 +522,8 @@ public class InventoryUI : MonoBehaviour
         }
 
         if (spacing < 0) spacing = 0;
+        if (slotInnerPadding < 0) slotInnerPadding = 0;
+        if (emptySlotFillColor.a <= 0f) emptySlotFillColor = DefaultEmptySlotFillColor;
         EnsureSlotSprites();
     }
 
@@ -504,6 +552,7 @@ public class InventorySlotUI : MonoBehaviour, IPointerDownHandler, IBeginDragHan
     public bool isHotbar;
     public int index;
     public Image background;
+    public Image fill;
     public Image icon;
     public Text countText;
     public InventorySlot data;
@@ -513,12 +562,22 @@ public class InventorySlotUI : MonoBehaviour, IPointerDownHandler, IBeginDragHan
         data = slot;
         if (slot == null || slot.IsEmpty())
         {
-            if (icon != null) icon.sprite = null;
+            if (icon != null)
+            {
+                icon.sprite = null;
+                icon.color = Color.white;
+                icon.enabled = false;
+            }
             if (countText != null) countText.text = "";
         }
         else
         {
-            if (icon != null) icon.sprite = slot.item != null ? slot.item.icon : null;
+            if (icon != null)
+            {
+                icon.sprite = slot.item != null ? slot.item.icon : null;
+                icon.color = Color.white;
+                icon.enabled = icon.sprite != null;
+            }
             if (countText != null) countText.text = slot.count > 1 ? slot.count.ToString() : "";
         }
     }
