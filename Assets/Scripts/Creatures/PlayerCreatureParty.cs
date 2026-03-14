@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 [DisallowMultipleComponent]
 public class PlayerCreatureParty : MonoBehaviour
@@ -33,6 +34,12 @@ public class PlayerCreatureParty : MonoBehaviour
         "galecrown"
     };
 
+    [Header("Debug")]
+    [Tooltip("Press the debug key to grant XP to the active creature.")]
+    public bool debugGiveActiveCreatureXp = true;
+    public Key debugGiveXpKey = Key.I;
+    [Min(1)] public int debugGiveXpAmount = 10;
+
     private readonly List<CreatureInstance> activeCreatures = new List<CreatureInstance>();
     public IReadOnlyList<CreatureInstance> ActiveCreatures => activeCreatures;
     public int ActivePartyIndex => Mathf.Clamp(activePartyIndex, 0, Mathf.Max(0, activeCreatures.Count - 1));
@@ -50,6 +57,11 @@ public class PlayerCreatureParty : MonoBehaviour
         {
             InitializeParty();
         }
+    }
+
+    void Update()
+    {
+        HandleDebugGiveXpHotkey();
     }
 
     [ContextMenu("Rebuild Party Now")]
@@ -287,5 +299,48 @@ public class PlayerCreatureParty : MonoBehaviour
         activePartyIndex = Mathf.Clamp(activePartyIndex, 0, Mathf.Max(0, activeCreatures.Count - 1));
 
         PartyChanged?.Invoke();
+    }
+
+    private void HandleDebugGiveXpHotkey()
+    {
+        if (!debugGiveActiveCreatureXp) return;
+
+        Keyboard kb = Keyboard.current;
+        if (kb == null) return;
+        if (!kb[debugGiveXpKey].wasPressedThisFrame) return;
+
+        if (activeCreatures == null || activeCreatures.Count == 0) return;
+        int idx = ActivePartyIndex;
+        if (idx < 0 || idx >= activeCreatures.Count) return;
+
+        CreatureInstance active = activeCreatures[idx];
+        if (active == null) return;
+
+        CreatureRegistry.Initialize();
+        CreatureDefinition def = CreatureRegistry.Get(active.definitionID);
+        if (def == null) return;
+
+        int amount = Mathf.Max(1, debugGiveXpAmount);
+        ExperienceGainResult gain = CreatureExperienceSystem.AddExperience(active, def, amount);
+
+        if (gain.experienceGranted > 0)
+        {
+            if (gain.leveledUp)
+            {
+                CreatureLevelUpSignal.Notify(active);
+            }
+
+            if (ActivePartyFollowerController.Instance != null)
+            {
+                CreatureCombatant followerCombatant = ActivePartyFollowerController.Instance.CurrentFollowerCombatant;
+                if (followerCombatant != null && ReferenceEquals(followerCombatant.Instance, active))
+                {
+                    followerCombatant.InitFromDefinition(def, active);
+                }
+            }
+
+            PartyChanged?.Invoke();
+            Debug.Log("[PlayerCreatureParty] Debug XP +" + gain.experienceGranted + " -> " + active.DisplayName + " (Lv " + active.level + ").");
+        }
     }
 }

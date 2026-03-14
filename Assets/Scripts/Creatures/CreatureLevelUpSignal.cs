@@ -10,6 +10,7 @@ public static class CreatureLevelUpSignal
     }
 
     private const float DefaultDuration = 1.8f;
+    private const float PendingReleaseDelayAfterBattleSeconds = 2.0f;
     private static readonly Dictionary<string, PulseState> ActivePulses = new Dictionary<string, PulseState>();
     private static readonly Dictionary<string, PulseState> PendingPulses = new Dictionary<string, PulseState>();
 
@@ -67,6 +68,19 @@ public static class CreatureLevelUpSignal
 
         if (PendingPulses.TryGetValue(key, out PulseState pending))
         {
+            float pendingDelay = Mathf.Max(0f, PendingReleaseDelayAfterBattleSeconds);
+            if (pending.startedAt <= 0f)
+            {
+                pending.startedAt = Time.unscaledTime;
+                PendingPulses[key] = pending;
+                return false;
+            }
+
+            if ((Time.unscaledTime - pending.startedAt) < pendingDelay)
+            {
+                return false;
+            }
+
             ActivePulses[key] = new PulseState
             {
                 startedAt = Time.unscaledTime,
