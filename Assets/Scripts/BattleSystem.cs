@@ -2119,10 +2119,10 @@ public class BattleSystem : MonoBehaviour
                 SetMessage("Opponent moves first.");
                 yield return new WaitForSeconds(opponentTurnDelay);
 
-                AttackData enemyAttack = ChooseEnemyAttack();
-                if (enemyAttack != null)
+                AttackData priorityEnemyAttack = ChooseEnemyAttack();
+                if (priorityEnemyAttack != null)
                 {
-                    yield return PerformAttack(enemyCreature, playerCreature, enemyAttack);
+                    yield return PerformAttack(enemyCreature, playerCreature, priorityEnemyAttack);
                 }
 
                 if (playerCreature == null || playerCreature.currentHP <= 0)

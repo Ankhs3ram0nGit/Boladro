@@ -19,6 +19,8 @@ public class InventoryUI : MonoBehaviour
     public int slotSize = 90;
     public int iconSize = 80;
     public int spacing = 2;
+    [Tooltip("Spacing between bag/inventory menu slots (Tab menu only).")]
+    public int inventoryMenuSlotSpacing = 10;
     public Sprite slotSprite;
     public Sprite selectedSprite;
     public Color normalColor = new Color(0.75f, 0.75f, 0.78f, 1f);
@@ -175,7 +177,8 @@ public class InventoryUI : MonoBehaviour
             if (g == null) g = root.gameObject.AddComponent<GridLayoutGroup>();
             if (h != null) DestroyImmediate(h);
             g.cellSize = new Vector2(slotSize, slotSize);
-            g.spacing = new Vector2(spacing, spacing);
+            int inventorySpacing = Mathf.Max(0, inventoryMenuSlotSpacing);
+            g.spacing = new Vector2(inventorySpacing, inventorySpacing);
             g.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             g.constraintCount = inventory.bagColumns;
             g.childAlignment = TextAnchor.MiddleCenter;
@@ -531,6 +534,7 @@ public class InventoryUI : MonoBehaviour
         }
 
         if (spacing < 0) spacing = 0;
+        if (inventoryMenuSlotSpacing < 0) inventoryMenuSlotSpacing = 0;
         if (slotInnerPadding < 0) slotInnerPadding = 0;
         if (emptySlotFillColor.a <= 0f) emptySlotFillColor = DefaultEmptySlotFillColor;
         EnsureSlotSprites();
