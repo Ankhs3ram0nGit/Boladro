@@ -1668,12 +1668,62 @@ public class BattleSystem : MonoBehaviour
             playerCreature.SyncInstanceRuntimeState();
         }
 
-        waitingForPlayerMove = true;
-        turnResolutionInProgress = false;
         UpdateCreatureSprites();
         UpdateUI();
-        CloseSwapMenu(true);
-        SetMessage("Go, " + target.DisplayName + "!");
+        CloseSwapMenu(false);
+        SetActionMenuVisible(false);
+        SetBackButtonVisible(false);
+        waitingForPlayerMove = false;
+        turnResolutionInProgress = true;
+        RefreshTurnInputState();
+        StartCoroutine(ResolveSwapTurn(target.DisplayName));
+    }
+
+    IEnumerator ResolveSwapTurn(string swappedInName)
+    {
+        if (!inBattle) yield break;
+        if (playerCreature == null || enemyCreature == null)
+        {
+            turnResolutionInProgress = false;
+            waitingForPlayerMove = true;
+            SetActionMenuVisible(true);
+            SetBackButtonVisible(false);
+            SetMessage("Choose an action.");
+            RefreshTurnInputState();
+            yield break;
+        }
+
+        if (!turnResolutionInProgress) turnResolutionInProgress = true;
+        waitingForPlayerMove = false;
+        SetMessage("Go, " + swappedInName + "!");
+        RefreshTurnInputState();
+        yield return new WaitForSeconds(actionPhaseDelay);
+
+        SetMessage("Opponent's turn.");
+        yield return new WaitForSeconds(opponentTurnDelay);
+
+        AttackData enemyAttack = ChooseEnemyAttack();
+        if (enemyAttack != null)
+        {
+            yield return PerformAttack(enemyCreature, playerCreature, enemyAttack);
+        }
+
+        if (playerCreature == null || playerCreature.currentHP <= 0)
+        {
+            turnResolutionInProgress = false;
+            HandlePlayerDefeat();
+            yield break;
+        }
+
+        ApplyEndOfTurnStatuses(playerCreature);
+        ApplyEndOfTurnStatuses(enemyCreature);
+        UpdateUI();
+
+        waitingForPlayerMove = true;
+        turnResolutionInProgress = false;
+        SetActionMenuVisible(true);
+        SetBackButtonVisible(false);
+        SetMessage("Choose an action.");
         RefreshTurnInputState();
     }
 
