@@ -69,17 +69,6 @@ public class TreeHoverSelector : MonoBehaviour
     [Min(0)] public int stoneBreakXp = 5;
     [Min(0.1f)] public float levelUpFloatingTextDuration = 1.0f;
 
-    [Header("XP Orb VFX")]
-    [Range(0.01f, 1f)] public float xpOrbScale = 0.14f;
-    [Min(0.01f)] public float xpOrbMoveDuration = 0.18f;
-    [Min(0.01f)] public float xpOrbExpandDuration = 0.08f;
-    [Min(0.01f)] public float xpOrbShrinkDuration = 0.10f;
-    [Min(0f)] public float xpOrbArcHeight = 0.16f;
-    [Min(-1f)] public float xpOrbTargetYOffset = 0.42f;
-    [Min(1f)] public float xpOrbCollectSortingBoost = 60f;
-    public Color xpOrbCoreColor = new Color(0.43f, 0.86f, 1f, 1f);
-    public Color xpOrbGlowColor = new Color(0.22f, 0.74f, 1f, 0.48f);
-
     [Header("Drop Behavior")]
     public float woodPickupDistance = 1f;
     [Range(0.01f, 1f)] public float woodDropScale = 0.1f;
@@ -131,20 +120,6 @@ public class TreeHoverSelector : MonoBehaviour
         public bool isCollecting;
     }
 
-    class ExperienceOrbEntry
-    {
-        public Transform root;
-        public SpriteRenderer coreRenderer;
-        public SpriteRenderer glowRenderer;
-        public Vector3 baseScale;
-        public int baseSortingLayerId;
-        public int baseSortingOrder;
-        public Vector3 collectStart;
-        public Vector3 collectTarget;
-        public float collectElapsed;
-        public float startDelay;
-    }
-
     struct HarvestSquashState
     {
         public Transform root;
@@ -158,7 +133,6 @@ public class TreeHoverSelector : MonoBehaviour
     private readonly Dictionary<int, int> harvestHealth = new Dictionary<int, int>();
     private readonly Dictionary<int, Coroutine> activeSquashRoutines = new Dictionary<int, Coroutine>();
     private readonly List<ResourceDropEntry> resourceDrops = new List<ResourceDropEntry>();
-    private readonly List<ExperienceOrbEntry> experienceOrbs = new List<ExperienceOrbEntry>();
 
     private PlayerToolController toolController;
     private PlayerToolController boundToolController;
@@ -200,15 +174,6 @@ public class TreeHoverSelector : MonoBehaviour
     {
         BindToolController(null);
         StopAllSquashRoutines();
-        for (int i = experienceOrbs.Count - 1; i >= 0; i--)
-        {
-            ExperienceOrbEntry orb = experienceOrbs[i];
-            if (orb != null && orb.root != null)
-            {
-                Destroy(orb.root.gameObject);
-            }
-        }
-        experienceOrbs.Clear();
         SetSelectorVisible(false);
         activeHoveredTarget = null;
     }
@@ -249,7 +214,6 @@ public class TreeHoverSelector : MonoBehaviour
 
         bool hasMouseWorld = TryGetMouseWorldPoint(out Vector2 mouseWorld);
         ProcessResourceDrops(hasMouseWorld, mouseWorld);
-        ProcessExperienceOrbs();
 
         if (toolController == null || !toolController.IsPickaxeEquipped())
         {
@@ -1005,7 +969,7 @@ public class TreeHoverSelector : MonoBehaviour
             SpawnResourceDrop(woodDropPos, target, "wood", "Wood", ResolveWoodSprite(), amount);
         }
 
-        GrantHarvestExperience(target.kind, b.center, target);
+        GrantHarvestExperience(target.kind);
 
         if (activeSquashRoutines.TryGetValue(id, out Coroutine running) && running != null)
         {
@@ -1031,7 +995,7 @@ public class TreeHoverSelector : MonoBehaviour
         return UnityEngine.Random.Range(min, max + 1);
     }
 
-    void GrantHarvestExperience(HarvestKind kind, Vector3 sourcePosition, HarvestEntry sourceTarget)
+    void GrantHarvestExperience(HarvestKind kind)
     {
         if (creatureParty == null) creatureParty = GetComponent<PlayerCreatureParty>();
         if (creatureParty == null || creatureParty.ActiveCreatures == null || creatureParty.ActiveCreatures.Count == 0) return;
@@ -1053,11 +1017,11 @@ public class TreeHoverSelector : MonoBehaviour
         int gainAmount = kind == HarvestKind.Stone ? Mathf.Max(0, stoneBreakXp) : Mathf.Max(0, treeBreakXp);
         if (gainAmount <= 0) return;
 
-        SpawnExperienceOrb(sourcePosition, sourceTarget);
         ExperienceGainResult gain = CreatureExperienceSystem.AddExperience(active, def, gainAmount);
 
         if (gain.leveledUp)
         {
+            CreatureLevelUpSignal.Notify(active);
             string levelMsg = active.DisplayName + " Lv " + gain.newLevel + "!";
             Vector3 textPos = new Vector3(transform.position.x, transform.position.y + 0.9f, transform.position.z);
             WorldFloatingText.Spawn(levelMsg, textPos, new Color(0.45f, 0.87f, 1f, 1f), levelUpFloatingTextDuration);
@@ -1074,173 +1038,6 @@ public class TreeHoverSelector : MonoBehaviour
         if (followerCombatant != null && ReferenceEquals(followerCombatant.Instance, active))
         {
             followerCombatant.InitFromDefinition(def, active);
-        }
-    }
-
-    void SpawnExperienceOrb(Vector3 worldPos, HarvestEntry sourceTarget)
-    {
-        GameObject root = new GameObject("XPOrb");
-        root.transform.position = worldPos;
-        root.layer = LayerMask.NameToLayer("Ignore Raycast");
-
-        SpriteRenderer core = root.AddComponent<SpriteRenderer>();
-        core.sprite = ExperienceOrbVisuals.CoreSprite;
-        core.color = xpOrbCoreColor;
-
-        GameObject glowGo = new GameObject("Glow");
-        glowGo.transform.SetParent(root.transform, false);
-        glowGo.transform.localPosition = Vector3.zero;
-        SpriteRenderer glow = glowGo.AddComponent<SpriteRenderer>();
-        glow.sprite = ExperienceOrbVisuals.GlowSprite;
-        glow.color = xpOrbGlowColor;
-
-        int highestOrder = 0;
-        int sortingLayerId = 0;
-        bool hasLayer = false;
-        if (sourceTarget != null && sourceTarget.renderers != null)
-        {
-            for (int i = 0; i < sourceTarget.renderers.Length; i++)
-            {
-                SpriteRenderer r = sourceTarget.renderers[i];
-                if (r == null) continue;
-                if (!hasLayer)
-                {
-                    sortingLayerId = r.sortingLayerID;
-                    hasLayer = true;
-                }
-                if (r.sortingOrder > highestOrder) highestOrder = r.sortingOrder;
-            }
-        }
-
-        if (hasLayer)
-        {
-            core.sortingLayerID = sortingLayerId;
-            glow.sortingLayerID = sortingLayerId;
-        }
-
-        core.sortingOrder = highestOrder + 3;
-        glow.sortingOrder = core.sortingOrder - 1;
-
-        float orbScale = Mathf.Max(0.01f, xpOrbScale);
-        root.transform.localScale = Vector3.one * orbScale;
-
-        experienceOrbs.Add(new ExperienceOrbEntry
-        {
-            root = root.transform,
-            coreRenderer = core,
-            glowRenderer = glow,
-            baseScale = root.transform.localScale,
-            baseSortingLayerId = core.sortingLayerID,
-            baseSortingOrder = core.sortingOrder,
-            collectStart = root.transform.position,
-            collectTarget = ResolveCurrentXpTarget(root.transform.position.z),
-            collectElapsed = 0f,
-            startDelay = 0f
-        });
-    }
-
-    void ProcessExperienceOrbs()
-    {
-        if (experienceOrbs.Count == 0) return;
-
-        for (int i = experienceOrbs.Count - 1; i >= 0; i--)
-        {
-            ExperienceOrbEntry orb = experienceOrbs[i];
-            if (orb == null || orb.root == null)
-            {
-                experienceOrbs.RemoveAt(i);
-                continue;
-            }
-
-            if (orb.startDelay > 0f)
-            {
-                orb.startDelay = Mathf.Max(0f, orb.startDelay - Time.deltaTime);
-                continue;
-            }
-
-            bool done = UpdateExperienceOrbAnimation(orb);
-            if (!done) continue;
-
-            if (orb.root != null) Destroy(orb.root.gameObject);
-            experienceOrbs.RemoveAt(i);
-        }
-    }
-
-    bool UpdateExperienceOrbAnimation(ExperienceOrbEntry orb)
-    {
-        if (orb == null || orb.root == null) return true;
-
-        float moveDuration = Mathf.Max(0.01f, xpOrbMoveDuration);
-        float expandDuration = Mathf.Max(0.01f, xpOrbExpandDuration);
-        float shrinkDuration = Mathf.Max(0.01f, xpOrbShrinkDuration);
-        const float expandScale = 1.35f;
-
-        orb.collectElapsed += Time.deltaTime;
-        float t = orb.collectElapsed;
-
-        orb.collectTarget = ResolveCurrentXpTarget(orb.root.position.z);
-        SetOrbCollectSorting(orb);
-
-        if (t <= moveDuration)
-        {
-            float u = Mathf.Clamp01(t / moveDuration);
-            float eased = 1f - Mathf.Pow(1f - u, 3f);
-            Vector3 pos = Vector3.Lerp(orb.collectStart, orb.collectTarget, eased);
-            pos.y += Mathf.Sin(u * Mathf.PI) * Mathf.Max(0f, xpOrbArcHeight);
-            orb.root.position = pos;
-            orb.root.localScale = orb.baseScale;
-            return false;
-        }
-
-        orb.root.position = orb.collectTarget;
-        t -= moveDuration;
-        if (t <= expandDuration)
-        {
-            float u = Mathf.Clamp01(t / expandDuration);
-            float s = Mathf.Lerp(1f, expandScale, u);
-            orb.root.localScale = orb.baseScale * s;
-            return false;
-        }
-
-        t -= expandDuration;
-        if (t <= shrinkDuration)
-        {
-            float u = Mathf.Clamp01(t / shrinkDuration);
-            float s = Mathf.Lerp(expandScale, 0f, u);
-            orb.root.localScale = orb.baseScale * s;
-            return false;
-        }
-
-        return true;
-    }
-
-    Vector3 ResolveCurrentXpTarget(float z)
-    {
-        return new Vector3(transform.position.x, transform.position.y + xpOrbTargetYOffset, z);
-    }
-
-    void SetOrbCollectSorting(ExperienceOrbEntry orb)
-    {
-        if (orb == null || orb.coreRenderer == null) return;
-
-        if (playerSpriteRenderer != null)
-        {
-            orb.coreRenderer.sortingLayerID = playerSpriteRenderer.sortingLayerID;
-            orb.coreRenderer.sortingOrder = playerSpriteRenderer.sortingOrder + Mathf.RoundToInt(Mathf.Max(1f, xpOrbCollectSortingBoost));
-            if (orb.glowRenderer != null)
-            {
-                orb.glowRenderer.sortingLayerID = orb.coreRenderer.sortingLayerID;
-                orb.glowRenderer.sortingOrder = orb.coreRenderer.sortingOrder - 1;
-            }
-            return;
-        }
-
-        orb.coreRenderer.sortingLayerID = orb.baseSortingLayerId;
-        orb.coreRenderer.sortingOrder = orb.baseSortingOrder + Mathf.RoundToInt(Mathf.Max(1f, xpOrbCollectSortingBoost));
-        if (orb.glowRenderer != null)
-        {
-            orb.glowRenderer.sortingLayerID = orb.coreRenderer.sortingLayerID;
-            orb.glowRenderer.sortingOrder = orb.coreRenderer.sortingOrder - 1;
         }
     }
 

@@ -66,6 +66,7 @@ public class BattleSystem : MonoBehaviour
     public Sprite swapCardBackgroundSprite;
     public Sprite swapCardGlassSprite;
     public Sprite swapExitIconSprite;
+    public Sprite levelUpArrowSprite;
 
     [Header("XP Rewards")]
     [Min(1)] public int battleWinBaseXp = 40;
@@ -73,14 +74,6 @@ public class BattleSystem : MonoBehaviour
     [Min(0.1f)] public float rareBattleXpMultiplier = 1.15f;
     [Min(0.1f)] public float eliteBattleXpMultiplier = 1.30f;
     [Min(0.1f)] public float legendaryBattleXpMultiplier = 1.55f;
-
-    [Header("Battle XP Orb VFX")]
-    [Min(0f)] public float battleXpOrbStagger = 0.08f;
-    [Min(0.01f)] public float battleXpOrbMoveDuration = 0.20f;
-    [Min(0.01f)] public float battleXpOrbExpandDuration = 0.08f;
-    [Min(0.01f)] public float battleXpOrbShrinkDuration = 0.10f;
-    [Min(0f)] public float battleXpOrbArcHeight = 34f;
-    [Min(0f)] public float battleXpOrbTargetYOffset = 0f;
 
     private PlayerMover playerMover;
     private PlayerHealth playerHealth;
@@ -151,6 +144,8 @@ public class BattleSystem : MonoBehaviour
         public RectTransform iconRect;
         public Image icon;
         public Image glass;
+        public RectTransform levelUpArrowRect;
+        public Image levelUpArrow;
         public Text nameText;
         public Text levelText;
         public Text hpText;
@@ -361,6 +356,11 @@ public class BattleSystem : MonoBehaviour
         {
             swapExitIconSprite = AssetDatabase.LoadAssetAtPath<Sprite>(
                 "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_IconCross01a.png");
+        }
+        if (levelUpArrowSprite == null)
+        {
+            levelUpArrowSprite = AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_IconArrow01a.png");
         }
 #endif
     }
@@ -1549,6 +1549,22 @@ public class BattleSystem : MonoBehaviour
         glass.raycastTarget = false;
         glass.enabled = false;
 
+        GameObject levelUpArrowGo = new GameObject("LevelUpArrow", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        levelUpArrowGo.transform.SetParent(slot.transform, false);
+        RectTransform levelUpArrowRt = levelUpArrowGo.GetComponent<RectTransform>();
+        levelUpArrowRt.anchorMin = new Vector2(1f, 0.5f);
+        levelUpArrowRt.anchorMax = new Vector2(1f, 0.5f);
+        levelUpArrowRt.pivot = new Vector2(0f, 0.5f);
+        levelUpArrowRt.anchoredPosition = new Vector2(8f, 0f);
+        levelUpArrowRt.sizeDelta = new Vector2(32f, 32f);
+        levelUpArrowRt.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        Image levelUpArrow = levelUpArrowGo.GetComponent<Image>();
+        levelUpArrow.sprite = levelUpArrowSprite;
+        levelUpArrow.color = new Color(1f, 1f, 1f, 0.94f);
+        levelUpArrow.preserveAspect = true;
+        levelUpArrow.raycastTarget = false;
+        levelUpArrow.enabled = false;
+
         return new SwapCardView
         {
             slotIndex = index,
@@ -1560,6 +1576,8 @@ public class BattleSystem : MonoBehaviour
             iconRect = iconRt,
             icon = icon,
             glass = glass,
+            levelUpArrowRect = levelUpArrowRt,
+            levelUpArrow = levelUpArrow,
             nameText = name,
             levelText = level,
             hpText = hp,
@@ -1703,6 +1721,7 @@ public class BattleSystem : MonoBehaviour
                 if (view.hpFill != null) view.hpFill.fillAmount = 0f;
                 if (view.xpFill != null) view.xpFill.fillAmount = 0f;
                 if (view.glass != null) view.glass.enabled = false;
+                if (view.levelUpArrow != null) view.levelUpArrow.enabled = false;
                 continue;
             }
 
@@ -1755,6 +1774,8 @@ public class BattleSystem : MonoBehaviour
                 view.glass.enabled = isActive;
             }
 
+            UpdateSwapCardLevelUpIndicator(view, inst);
+
             view.button.interactable = selectable;
         }
     }
@@ -1764,6 +1785,44 @@ public class BattleSystem : MonoBehaviour
         if (instance == null) return 0f;
         CreatureDefinition def = CreatureRegistry.Get(instance.definitionID);
         return CreatureExperienceSystem.GetLevelProgress01(instance, def);
+    }
+
+    void UpdateSwapCardLevelUpIndicator(SwapCardView view, CreatureInstance instance)
+    {
+        if (view == null || view.levelUpArrow == null || view.levelUpArrowRect == null)
+        {
+            return;
+        }
+
+        Sprite arrowSprite = levelUpArrowSprite;
+        if (arrowSprite != null && view.levelUpArrow.sprite != arrowSprite)
+        {
+            view.levelUpArrow.sprite = arrowSprite;
+        }
+
+        if (instance == null)
+        {
+            view.levelUpArrow.enabled = false;
+            view.levelUpArrowRect.localScale = Vector3.one;
+            return;
+        }
+
+        if (!CreatureLevelUpSignal.TryGetPulse01(instance, out float pulse01))
+        {
+            view.levelUpArrow.enabled = false;
+            view.levelUpArrowRect.localScale = Vector3.one;
+            return;
+        }
+
+        float envelope = 1f - Mathf.Clamp01(pulse01);
+        float bob = Mathf.Sin(pulse01 * Mathf.PI * 8f) * 4f * envelope;
+        float pop = 1f + Mathf.Sin(pulse01 * Mathf.PI * 6f) * 0.16f * envelope;
+        Color c = view.levelUpArrow.color;
+        c.a = Mathf.Lerp(0.45f, 1f, envelope);
+        view.levelUpArrow.color = c;
+        view.levelUpArrow.enabled = true;
+        view.levelUpArrowRect.localScale = new Vector3(pop, pop, 1f);
+        view.levelUpArrowRect.anchoredPosition = new Vector2(8f, bob);
     }
 
     void TryMarkBattleParticipant(CreatureCombatant combatant)
@@ -1849,7 +1908,6 @@ public class BattleSystem : MonoBehaviour
         if (recipients.Count == 0) yield break;
 
         int xpPerRecipient = CalculateBattleWinXp();
-        Vector2 orbStart = ResolveBattleOrbLocalPoint(enemySpriteImage != null ? enemySpriteImage.rectTransform : null, new Vector2(0f, 20f));
 
         for (int i = 0; i < recipients.Count; i++)
         {
@@ -1858,9 +1916,6 @@ public class BattleSystem : MonoBehaviour
 
             CreatureDefinition def = CreatureRegistry.Get(inst.definitionID);
             if (def == null) continue;
-
-            Vector2 orbTarget = ResolveBattleOrbLocalPoint(playerXpBg != null ? playerXpBg.rectTransform : null, new Vector2(0f, battleXpOrbTargetYOffset));
-            SpawnBattleXpOrb(orbStart, orbTarget, i * Mathf.Max(0f, battleXpOrbStagger));
 
             ExperienceGainResult gain = CreatureExperienceSystem.AddExperience(inst, def, xpPerRecipient);
             if (ReferenceEquals(playerCreature != null ? playerCreature.Instance : null, inst))
@@ -1878,6 +1933,7 @@ public class BattleSystem : MonoBehaviour
 
             if (gain.leveledUp)
             {
+                CreatureLevelUpSignal.Notify(inst);
                 SetMessage(inst.DisplayName + " grew to Lv " + gain.newLevel + "!");
                 UpdateUI();
                 RefreshSwapMenuCards();
@@ -1889,9 +1945,6 @@ public class BattleSystem : MonoBehaviour
         {
             playerParty.NotifyPartyChanged();
         }
-
-        float settle = battleXpOrbMoveDuration + battleXpOrbExpandDuration + battleXpOrbShrinkDuration + (Mathf.Max(0, recipients.Count - 1) * Mathf.Max(0f, battleXpOrbStagger));
-        yield return new WaitForSeconds(Mathf.Clamp(settle, 0.12f, 1.2f));
     }
 
     void ApplyInstanceProgressionToCombatant(CreatureCombatant combatant, CreatureDefinition def, CreatureInstance inst)
@@ -1908,125 +1961,6 @@ public class BattleSystem : MonoBehaviour
         combatant.speed = Mathf.Max(1, stats.speed);
         combatant.currentHP = Mathf.Clamp(inst.currentHP, 0, combatant.maxHP);
         combatant.SyncInstanceRuntimeState();
-    }
-
-    Vector2 ResolveBattleOrbLocalPoint(RectTransform source, Vector2 offset)
-    {
-        RectTransform rootRt = battleRoot != null ? battleRoot.GetComponent<RectTransform>() : null;
-        if (rootRt == null || source == null)
-        {
-            return offset;
-        }
-
-        Vector3 world = source.TransformPoint(source.rect.center);
-        Vector2 screen = RectTransformUtility.WorldToScreenPoint(null, world);
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(rootRt, screen, null, out Vector2 local))
-        {
-            return local + offset;
-        }
-
-        return offset;
-    }
-
-    void SpawnBattleXpOrb(Vector2 start, Vector2 target, float startDelay)
-    {
-        if (battleRoot == null) return;
-        RectTransform parent = battleRoot.GetComponent<RectTransform>();
-        if (parent == null) return;
-
-        GameObject root = new GameObject("BattleXPOrb", typeof(RectTransform), typeof(CanvasRenderer));
-        root.transform.SetParent(parent, false);
-        RectTransform rootRt = root.GetComponent<RectTransform>();
-        rootRt.anchorMin = new Vector2(0.5f, 0.5f);
-        rootRt.anchorMax = new Vector2(0.5f, 0.5f);
-        rootRt.pivot = new Vector2(0.5f, 0.5f);
-        rootRt.sizeDelta = new Vector2(14f, 14f);
-        rootRt.anchoredPosition = start;
-        rootRt.localScale = Vector3.one;
-        rootRt.SetAsLastSibling();
-
-        Image glow = new GameObject("Glow", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image)).GetComponent<Image>();
-        glow.transform.SetParent(rootRt, false);
-        RectTransform glowRt = glow.rectTransform;
-        glowRt.anchorMin = new Vector2(0.5f, 0.5f);
-        glowRt.anchorMax = new Vector2(0.5f, 0.5f);
-        glowRt.pivot = new Vector2(0.5f, 0.5f);
-        glowRt.sizeDelta = new Vector2(22f, 22f);
-        glow.sprite = ExperienceOrbVisuals.GlowSprite;
-        glow.color = new Color(0.22f, 0.74f, 1f, 0.45f);
-        glow.raycastTarget = false;
-
-        Image core = new GameObject("Core", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image)).GetComponent<Image>();
-        core.transform.SetParent(rootRt, false);
-        RectTransform coreRt = core.rectTransform;
-        coreRt.anchorMin = new Vector2(0.5f, 0.5f);
-        coreRt.anchorMax = new Vector2(0.5f, 0.5f);
-        coreRt.pivot = new Vector2(0.5f, 0.5f);
-        coreRt.sizeDelta = new Vector2(10f, 10f);
-        core.sprite = ExperienceOrbVisuals.CoreSprite;
-        core.color = new Color(0.43f, 0.86f, 1f, 1f);
-        core.raycastTarget = false;
-
-        StartCoroutine(AnimateBattleXpOrb(rootRt, start, target, Mathf.Max(0f, startDelay)));
-    }
-
-    IEnumerator AnimateBattleXpOrb(RectTransform orbRt, Vector2 start, Vector2 target, float startDelay)
-    {
-        if (orbRt == null) yield break;
-
-        if (startDelay > 0f)
-        {
-            yield return new WaitForSeconds(startDelay);
-            if (orbRt == null) yield break;
-        }
-
-        float moveDuration = Mathf.Max(0.01f, battleXpOrbMoveDuration);
-        float expandDuration = Mathf.Max(0.01f, battleXpOrbExpandDuration);
-        float shrinkDuration = Mathf.Max(0.01f, battleXpOrbShrinkDuration);
-        const float expandScale = 1.35f;
-
-        float t = 0f;
-        while (t < moveDuration)
-        {
-            if (orbRt == null) yield break;
-            t += Time.deltaTime;
-            float u = Mathf.Clamp01(t / moveDuration);
-            float eased = 1f - Mathf.Pow(1f - u, 3f);
-            Vector2 pos = Vector2.Lerp(start, target, eased);
-            pos.y += Mathf.Sin(u * Mathf.PI) * Mathf.Max(0f, battleXpOrbArcHeight);
-            orbRt.anchoredPosition = pos;
-            yield return null;
-        }
-
-        if (orbRt == null) yield break;
-        orbRt.anchoredPosition = target;
-
-        t = 0f;
-        while (t < expandDuration)
-        {
-            if (orbRt == null) yield break;
-            t += Time.deltaTime;
-            float u = Mathf.Clamp01(t / expandDuration);
-            float s = Mathf.Lerp(1f, expandScale, u);
-            orbRt.localScale = new Vector3(s, s, 1f);
-            yield return null;
-        }
-
-        t = 0f;
-        while (t < shrinkDuration)
-        {
-            if (orbRt == null) yield break;
-            t += Time.deltaTime;
-            float u = Mathf.Clamp01(t / shrinkDuration);
-            float s = Mathf.Lerp(expandScale, 0f, u);
-            orbRt.localScale = new Vector3(s, s, 1f);
-            yield return null;
-        }
-
-        if (orbRt != null)
-        {
-            Destroy(orbRt.gameObject);
-        }
     }
 
     int ResolveActivePartyIndexForCurrentBattleCreature(int countLimit)

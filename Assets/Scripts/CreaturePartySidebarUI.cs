@@ -15,6 +15,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
         public Image background;
         public RectTransform iconRect;
         public Image icon;
+        public RectTransform levelUpArrowRect;
+        public Image levelUpArrow;
         public RectTransform faintedOverlayRect;
         public Image faintedOverlay;
         public Image glass;
@@ -56,11 +58,14 @@ public class CreaturePartySidebarUI : MonoBehaviour
     public Sprite markerBackgroundSprite;
     public Sprite glassOverlaySprite;
     public Sprite faintedCrossSprite;
+    public Sprite levelUpArrowSprite;
     public Color markerColor = Color.white;
     public Color activeMarkerColor = Color.white;
     public Color glassColor = new Color(1f, 1f, 1f, 0.9f);
     public Color glassOutlineColor = new Color(0f, 0f, 0f, 1f);
     [Range(0.2f, 4f)] public float glassOutlineThickness = 1.2f;
+    public Color levelUpArrowColor = new Color(1f, 1f, 1f, 0.95f);
+    public Vector2 levelUpArrowSize = new Vector2(24f, 24f);
 
     [Header("Active Info")]
     public Color nameColor = Color.white;
@@ -367,6 +372,22 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.icon.preserveAspect = true;
         view.icon.raycastTarget = false;
 
+        GameObject levelUpArrowGO = new GameObject("LevelUpArrow", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        levelUpArrowGO.transform.SetParent(slot.transform, false);
+        view.levelUpArrowRect = levelUpArrowGO.GetComponent<RectTransform>();
+        view.levelUpArrowRect.anchorMin = new Vector2(1f, 0.5f);
+        view.levelUpArrowRect.anchorMax = new Vector2(1f, 0.5f);
+        view.levelUpArrowRect.pivot = new Vector2(0f, 0.5f);
+        view.levelUpArrowRect.anchoredPosition = new Vector2(8f, 0f);
+        view.levelUpArrowRect.sizeDelta = levelUpArrowSize;
+        view.levelUpArrowRect.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        view.levelUpArrow = levelUpArrowGO.GetComponent<Image>();
+        view.levelUpArrow.sprite = levelUpArrowSprite;
+        view.levelUpArrow.color = levelUpArrowColor;
+        view.levelUpArrow.preserveAspect = true;
+        view.levelUpArrow.raycastTarget = false;
+        view.levelUpArrow.enabled = false;
+
         GameObject faintedGO = new GameObject("FaintedOverlay", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
         faintedGO.transform.SetParent(slot.transform, false);
         view.faintedOverlayRect = faintedGO.GetComponent<RectTransform>();
@@ -531,6 +552,13 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.glass.color = glassColor;
         view.glassOutline.effectColor = glassOutlineColor;
         view.glassOutline.effectDistance = new Vector2(glassOutlineThickness, glassOutlineThickness);
+
+        if (view.levelUpArrow != null && view.levelUpArrowRect != null)
+        {
+            view.levelUpArrow.sprite = levelUpArrowSprite;
+            view.levelUpArrow.color = levelUpArrowColor;
+            view.levelUpArrowRect.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        }
 
         LayoutText(view.nameText.rectTransform, new Vector2(0f, 0.72f), new Vector2(0.75f, 1f));
         LayoutText(view.levelText.rectTransform, new Vector2(0.75f, 0.72f), new Vector2(1f, 1f));
@@ -706,6 +734,36 @@ public class CreaturePartySidebarUI : MonoBehaviour
             float iconX = Mathf.Lerp(collapsedIconX, expandedIconX, view.expandT);
             view.iconRect.anchoredPosition = new Vector2(iconX, 0f);
 
+            if (view.levelUpArrowRect != null && view.levelUpArrow != null)
+            {
+                view.levelUpArrowRect.anchorMin = new Vector2(1f, 0.5f);
+                view.levelUpArrowRect.anchorMax = new Vector2(1f, 0.5f);
+                view.levelUpArrowRect.pivot = new Vector2(0f, 0.5f);
+                view.levelUpArrowRect.sizeDelta = levelUpArrowSize;
+                view.levelUpArrowRect.localRotation = Quaternion.Euler(0f, 0f, 90f);
+                view.levelUpArrow.sprite = levelUpArrowSprite;
+                bool hasPulse = CreatureLevelUpSignal.TryGetPulse01(view.instance, out float pulse01);
+                if (hasPulse)
+                {
+                    float envelope = 1f - Mathf.Clamp01(pulse01);
+                    float bob = Mathf.Sin(pulse01 * Mathf.PI * 8f) * 3f * envelope;
+                    float pop = 1f + Mathf.Sin(pulse01 * Mathf.PI * 6f) * 0.16f * envelope;
+                    Color pulseColor = levelUpArrowColor;
+                    pulseColor.a = Mathf.Lerp(0.45f, levelUpArrowColor.a, envelope);
+                    view.levelUpArrow.color = pulseColor;
+                    view.levelUpArrowRect.localScale = new Vector3(pop, pop, 1f);
+                    view.levelUpArrowRect.anchoredPosition = new Vector2(8f, bob);
+                    view.levelUpArrow.enabled = true;
+                }
+                else
+                {
+                    view.levelUpArrowRect.localScale = Vector3.one;
+                    view.levelUpArrowRect.anchoredPosition = new Vector2(8f, 0f);
+                    view.levelUpArrow.enabled = false;
+                }
+                view.levelUpArrowRect.SetAsLastSibling();
+            }
+
             if (view.faintedOverlayRect != null)
             {
                 view.faintedOverlayRect.anchorMin = view.iconRect.anchorMin;
@@ -834,6 +892,12 @@ public class CreaturePartySidebarUI : MonoBehaviour
         {
             faintedCrossSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
                 "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_IconCross01a.png");
+        }
+
+        if (levelUpArrowSprite == null)
+        {
+            levelUpArrowSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_IconArrow01a.png");
         }
 #endif
     }
