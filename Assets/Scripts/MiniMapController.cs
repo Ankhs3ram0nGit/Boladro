@@ -9,7 +9,7 @@ public class MiniMapController : MonoBehaviour
     public Vector2 panelSize = new Vector2(190f, 190f);
     public Vector2 panelOffset = new Vector2(-18f, -18f);
     public float panelPadding = 8f;
-    public Color panelColor = new Color(0f, 0f, 0f, 0.45f);
+    public Color panelColor = new Color(0f, 0f, 0f, 1f);
 
     [Header("Map Camera")]
     public float minimapOrthographicSize = 14f;
@@ -27,6 +27,10 @@ public class MiniMapController : MonoBehaviour
     public Color markerOuterColor = Color.black;
     public Color markerInnerColor = Color.white;
 
+    [Header("Active Creature Marker")]
+    [Range(0.2f, 1f)] public float activeCreatureDotScaleVsPlayer = 0.5f;
+    public Color activeCreatureDotColor = Color.red;
+
     [Header("Creature Blips")]
     public float creatureBlipSize = 18f;
     [Min(0.1f)] public float creatureScanInterval = 0.45f;
@@ -41,6 +45,7 @@ public class MiniMapController : MonoBehaviour
     private RectTransform rootRect;
     private RectTransform mapRectTransform;
     private RectTransform creatureBlipRoot;
+    private RectTransform activeCreatureMarker;
     private RawImage mapImage;
     private bool initialized;
     private bool createdCanvasAtRuntime;
@@ -86,6 +91,7 @@ public class MiniMapController : MonoBehaviour
         if (minimapCamera == null) return;
         RenderMinimapIfNeeded(false);
         UpdateCreatureBlips();
+        UpdateActiveCreatureMarker();
     }
 
     void OnDestroy()
@@ -189,7 +195,7 @@ public class MiniMapController : MonoBehaviour
             rootRect = root.AddComponent<RectTransform>();
             root.transform.SetParent(canvas.transform, false);
             Image panel = root.AddComponent<Image>();
-            panel.color = panelColor;
+            panel.color = new Color(panelColor.r, panelColor.g, panelColor.b, 1f);
         }
         else
         {
@@ -197,7 +203,7 @@ public class MiniMapController : MonoBehaviour
             if (rootRect == null) rootRect = existing.gameObject.AddComponent<RectTransform>();
             Image panel = existing.GetComponent<Image>();
             if (panel == null) panel = existing.gameObject.AddComponent<Image>();
-            panel.color = panelColor;
+            panel.color = new Color(panelColor.r, panelColor.g, panelColor.b, 1f);
         }
 
         rootRect.anchorMin = new Vector2(1f, 1f);
@@ -225,8 +231,9 @@ public class MiniMapController : MonoBehaviour
 
         mapRect.anchorMin = Vector2.zero;
         mapRect.anchorMax = Vector2.one;
-        mapRect.offsetMin = new Vector2(panelPadding, panelPadding);
-        mapRect.offsetMax = new Vector2(-panelPadding, -panelPadding);
+        float effectivePadding = Mathf.Max(1f, panelPadding * 0.5f);
+        mapRect.offsetMin = new Vector2(effectivePadding, effectivePadding);
+        mapRect.offsetMax = new Vector2(-effectivePadding, -effectivePadding);
         mapImage.texture = minimapTexture;
         mapImage.color = Color.white;
         mapImage.raycastTarget = false;
@@ -234,6 +241,7 @@ public class MiniMapController : MonoBehaviour
         EnsureCreatureBlipLayer(mapRectTransform);
 
         EnsurePlayerMarker(rootRect);
+        EnsureActiveCreatureMarker(mapRectTransform);
         RequestMinimapRender();
     }
 
@@ -263,6 +271,7 @@ public class MiniMapController : MonoBehaviour
     void UpdateCreatureBlips()
     {
         if (creatureBlipRoot == null || mapRectTransform == null) return;
+        Transform activeCreature = GetActiveCreatureTransform();
 
         if (Time.time >= nextCreatureScanAt)
         {
@@ -286,6 +295,12 @@ public class MiniMapController : MonoBehaviour
                 continue;
             }
 
+            if (activeCreature != null && blip.target == activeCreature)
+            {
+                blip.image.enabled = false;
+                continue;
+            }
+
             Vector2 delta = (Vector2)blip.target.position - playerPos;
             bool visible = Mathf.Abs(delta.x) <= halfWidth && Mathf.Abs(delta.y) <= halfHeight;
             blip.image.enabled = visible;
@@ -300,6 +315,38 @@ public class MiniMapController : MonoBehaviour
             if (source != null) blip.image.sprite = source;
             blip.image.color = creatureBlipTint;
         }
+    }
+
+    void UpdateActiveCreatureMarker()
+    {
+        if (activeCreatureMarker == null || mapRectTransform == null) return;
+
+        Transform active = GetActiveCreatureTransform();
+        if (active == null)
+        {
+            activeCreatureMarker.gameObject.SetActive(false);
+            return;
+        }
+
+        float halfHeight = Mathf.Max(0.01f, minimapOrthographicSize);
+        Rect rect = mapRectTransform.rect;
+        float mapAspect = Mathf.Max(0.01f, rect.width / Mathf.Max(1f, rect.height));
+        float halfWidth = halfHeight * mapAspect;
+        float halfUiW = rect.width * 0.5f;
+        float halfUiH = rect.height * 0.5f;
+        Vector2 playerPos = transform.position;
+        Vector2 delta = (Vector2)active.position - playerPos;
+
+        bool visible = Mathf.Abs(delta.x) <= halfWidth && Mathf.Abs(delta.y) <= halfHeight;
+        activeCreatureMarker.gameObject.SetActive(visible);
+        if (!visible) return;
+
+        float nx = delta.x / halfWidth;
+        float ny = delta.y / halfHeight;
+        activeCreatureMarker.anchoredPosition = new Vector2(nx * halfUiW, ny * halfUiH);
+
+        float size = Mathf.Max(3f, markerOuterSize * Mathf.Clamp(activeCreatureDotScaleVsPlayer, 0.2f, 1f));
+        activeCreatureMarker.sizeDelta = new Vector2(size, size);
     }
 
     void RefreshCreatureBlipTargets()
@@ -422,6 +469,27 @@ public class MiniMapController : MonoBehaviour
 
         RectTransform outer = EnsureMarkerLayer(parent, "PlayerMarkerOuter", markerSprite, markerOuterColor, markerOuterSize);
         EnsureMarkerLayer(outer, "PlayerMarkerInner", markerSprite, markerInnerColor, markerInnerSize);
+    }
+
+    void EnsureActiveCreatureMarker(RectTransform parent)
+    {
+        if (parent == null) return;
+        activeCreatureMarker = EnsureMarkerLayer(parent, "ActiveCreatureMarker", GetCircleSprite(), activeCreatureDotColor, markerOuterSize * 0.5f);
+        if (activeCreatureMarker != null)
+        {
+            activeCreatureMarker.SetAsLastSibling();
+            Image img = activeCreatureMarker.GetComponent<Image>();
+            if (img != null)
+            {
+                img.color = activeCreatureDotColor;
+            }
+        }
+    }
+
+    Transform GetActiveCreatureTransform()
+    {
+        if (ActivePartyFollowerController.Instance == null) return null;
+        return ActivePartyFollowerController.Instance.CurrentFollowerTransform;
     }
 
     RectTransform EnsureMarkerLayer(Transform parent, string name, Sprite sprite, Color color, float size)

@@ -60,6 +60,7 @@ public class BattleSystem : MonoBehaviour
     public Vector2 engageDebugPanelSize = new Vector2(560f, 190f);
     [Header("Swap Menu")]
     [Range(0f, 1f)] public float swapOverlayOpacity = 0.72f;
+    [Range(0.2f, 1f)] public float swapActiveCardOpacity = 0.75f;
     public Sprite swapCardBackgroundSprite;
     public Sprite swapCardGlassSprite;
     public Sprite swapExitIconSprite;
@@ -120,6 +121,7 @@ public class BattleSystem : MonoBehaviour
     {
         public int slotIndex;
         public Button button;
+        public CanvasGroup canvasGroup;
         public RectTransform root;
         public LayoutElement layout;
         public Image background;
@@ -549,43 +551,25 @@ public class BattleSystem : MonoBehaviour
             IsEngagedBattleActive = false;
         }
 
-        if (engageRadius < 0.25f) engageRadius = 5f;
-        if (fallbackEngageRadius < engageRadius) fallbackEngageRadius = Mathf.Max(engageRadius, 10f);
-        if (maxEngageSearchRadius < fallbackEngageRadius) maxEngageSearchRadius = Mathf.Max(12f, fallbackEngageRadius);
-        RefreshEngageDebugSnapshot(maxEngageSearchRadius);
+        const float strictEncounterRangeTiles = 5f;
+        engageRadius = strictEncounterRangeTiles;
+        RefreshEngageDebugSnapshot(strictEncounterRangeTiles);
         ClearStaleWildBattleFlags();
 
-        currentEnemyAI = FindEngageTarget(engageRadius);
+        currentEnemyAI = FindEngageTarget(strictEncounterRangeTiles);
         if (currentEnemyAI == null)
         {
-            SetEngageDebug("No target in engageRadius. Trying fallback radius.");
-            currentEnemyAI = FindEngageTarget(fallbackEngageRadius);
-        }
-        if (currentEnemyAI == null)
-        {
-            // Failsafe: still allow engagement by selecting the nearest valid wild creature in a larger range.
-            SetEngageDebug("No target in fallback radius. Trying max search radius.");
-            currentEnemyAI = FindEngageTarget(maxEngageSearchRadius);
-        }
-        if (currentEnemyAI == null)
-        {
-            // Final fallback: nearest alive wild creature anywhere in scene.
-            SetEngageDebug("No target in max radius. Trying nearest alive wild globally.");
-            currentEnemyAI = FindNearestEngageableWildAnyDistance();
-        }
-        if (currentEnemyAI == null)
-        {
-            // Absolute fallback: build a temporary engageable target from any nearby creature object.
-            SetEngageDebug("No wild target found. Trying fallback from CreatureHealth.");
-            currentEnemyAI = FindOrCreateFallbackWildTarget();
-        }
-        if (currentEnemyAI == null)
-        {
-            SetEngageDebug("Engage failed: no valid target found.");
+            SetEngageDebug("Engage failed: no valid target within 5 tiles.");
             return false;
         }
 
         float dist = Vector2.Distance(transform.position, currentEnemyAI.transform.position);
+        if (dist > strictEncounterRangeTiles + 0.001f)
+        {
+            SetEngageDebug("Engage blocked: target is farther than 5 tiles.");
+            currentEnemyAI = null;
+            return false;
+        }
         SetEngageDebug("Engaging: " + currentEnemyAI.name + " at distance " + dist.ToString("0.00"));
         StartBattle(currentEnemyAI);
         return true;
@@ -1375,6 +1359,11 @@ public class BattleSystem : MonoBehaviour
         int captured = index;
         btn.onClick.RemoveAllListeners();
         btn.onClick.AddListener(() => OnSwapCardSelected(captured));
+        CanvasGroup canvasGroup = slot.GetComponent<CanvasGroup>();
+        if (canvasGroup == null) canvasGroup = slot.AddComponent<CanvasGroup>();
+        canvasGroup.alpha = 1f;
+        canvasGroup.interactable = true;
+        canvasGroup.blocksRaycasts = true;
 
         GameObject iconGo = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
         iconGo.transform.SetParent(slot.transform, false);
@@ -1431,6 +1420,7 @@ public class BattleSystem : MonoBehaviour
         {
             slotIndex = index,
             button = btn,
+            canvasGroup = canvasGroup,
             root = slotRt,
             layout = layout,
             background = bg,
@@ -1563,6 +1553,10 @@ public class BattleSystem : MonoBehaviour
             int curHp = Mathf.Clamp(inst.currentHP, 0, maxHp);
             bool isActive = i == activeIndex;
             bool selectable = !isActive && curHp > 0;
+            if (view.canvasGroup != null)
+            {
+                view.canvasGroup.alpha = isActive ? Mathf.Clamp01(swapActiveCardOpacity) : 1f;
+            }
 
             if (view.icon != null)
             {
