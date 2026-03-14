@@ -112,7 +112,7 @@ public class BattleSystem : MonoBehaviour
     private Vector3 playerSpriteBaseLocalScale = Vector3.one;
     private Vector3 enemySpriteBaseLocalScale = Vector3.one;
     private static readonly Color HpGreen = new Color(0.20f, 0.82f, 0.24f, 1f);
-    private static readonly Color HpLightGreen = new Color(0.56f, 0.90f, 0.34f, 1f);
+    private static readonly Color HpYellow = new Color(0.97f, 0.88f, 0.20f, 1f);
     private static readonly Color HpOrange = new Color(1.00f, 0.62f, 0.16f, 1f);
     private static readonly Color HpRed = new Color(0.90f, 0.18f, 0.18f, 1f);
 
@@ -850,7 +850,8 @@ public class BattleSystem : MonoBehaviour
         if (playerCreature != null)
         {
             string playerId = ResolveCreatureID(playerCreature.gameObject, playerCreature);
-            ConfigureCombatantByCreatureID(playerCreature, playerId, Mathf.Max(1, playerCreature.level), true);
+            // Preserve party creature HP/PP across battle sessions.
+            ConfigureCombatantByCreatureID(playerCreature, playerId, Mathf.Max(1, playerCreature.level), false);
         }
         else
         {
@@ -1645,41 +1646,16 @@ public class BattleSystem : MonoBehaviour
             return;
         }
 
-        if (playerCreature != null)
-        {
-            playerCreature.SyncInstanceRuntimeState();
-        }
-
-        playerParty.SetActivePartyIndex(slotIndex);
-        playerCreature = ResolvePlayerCombatant();
-
-        if (playerCreature != null && playerCreature.Instance != target)
-        {
-            CreatureDefinition def = CreatureRegistry.Get(target.definitionID);
-            if (def != null)
-            {
-                playerCreature.autoInitWhelpling = false;
-                playerCreature.InitFromDefinition(def, target);
-            }
-        }
-
-        if (playerCreature != null)
-        {
-            playerCreature.SyncInstanceRuntimeState();
-        }
-
-        UpdateCreatureSprites();
-        UpdateUI();
         CloseSwapMenu(false);
         SetActionMenuVisible(false);
         SetBackButtonVisible(false);
         waitingForPlayerMove = false;
         turnResolutionInProgress = true;
         RefreshTurnInputState();
-        StartCoroutine(ResolveSwapTurn(target.DisplayName));
+        StartCoroutine(ResolveSwapTurn(slotIndex, target));
     }
 
-    IEnumerator ResolveSwapTurn(string swappedInName)
+    IEnumerator ResolveSwapTurn(int swapSlotIndex, CreatureInstance swappedInInstance)
     {
         if (!inBattle) yield break;
         if (playerCreature == null || enemyCreature == null)
@@ -1694,9 +1670,48 @@ public class BattleSystem : MonoBehaviour
         }
 
         if (!turnResolutionInProgress) turnResolutionInProgress = true;
+        bool skipIdleForSwap = playerSpriteImage != null && activeAttackAnimations.Add(playerSpriteImage);
         waitingForPlayerMove = false;
-        SetMessage("Go, " + swappedInName + "!");
+        string outgoingName = playerCreature != null ? playerCreature.creatureName : "Creature";
+        SetMessage("Return, " + outgoingName + "!");
         RefreshTurnInputState();
+
+        yield return StartCoroutine(AnimatePlayerSwapSlideOut());
+
+        if (playerCreature != null)
+        {
+            playerCreature.SyncInstanceRuntimeState();
+        }
+
+        playerParty.SetActivePartyIndex(swapSlotIndex);
+        playerCreature = ResolvePlayerCombatant();
+
+        if (playerCreature != null && playerCreature.Instance != swappedInInstance)
+        {
+            CreatureDefinition def = CreatureRegistry.Get(swappedInInstance.definitionID);
+            if (def != null)
+            {
+                playerCreature.autoInitWhelpling = false;
+                playerCreature.InitFromDefinition(def, swappedInInstance);
+            }
+        }
+
+        if (playerCreature != null)
+        {
+            playerCreature.SyncInstanceRuntimeState();
+        }
+
+        UpdateCreatureSprites();
+        UpdateUI();
+        yield return StartCoroutine(AnimatePlayerSwapSlideIn());
+
+        if (skipIdleForSwap)
+        {
+            activeAttackAnimations.Remove(playerSpriteImage);
+        }
+
+        string swappedInName = swappedInInstance != null ? swappedInInstance.DisplayName : "Creature";
+        SetMessage("Go, " + swappedInName + "!");
         yield return new WaitForSeconds(actionPhaseDelay);
 
         SetMessage("Opponent's turn.");
@@ -1725,6 +1740,52 @@ public class BattleSystem : MonoBehaviour
         SetBackButtonVisible(false);
         SetMessage("Choose an action.");
         RefreshTurnInputState();
+    }
+
+    IEnumerator AnimatePlayerSwapSlideOut()
+    {
+        if (playerSpriteImage == null || playerSpriteImage.rectTransform == null) yield break;
+        RectTransform rt = playerSpriteImage.rectTransform;
+        Vector3 start = playerSpriteBaseLocalPos;
+        Vector3 end = GetPlayerSwapOffscreenLocalPos(start.y, start.z);
+        yield return StartCoroutine(AnimateRectLocalSlide(rt, start, end, 0.24f));
+        rt.localPosition = end;
+        if (playerShadowImage != null) playerShadowImage.enabled = false;
+    }
+
+    IEnumerator AnimatePlayerSwapSlideIn()
+    {
+        if (playerSpriteImage == null || playerSpriteImage.rectTransform == null) yield break;
+        RectTransform rt = playerSpriteImage.rectTransform;
+        Vector3 end = playerSpriteBaseLocalPos;
+        Vector3 start = GetPlayerSwapOffscreenLocalPos(end.y, end.z);
+        rt.localPosition = start;
+        if (playerShadowImage != null) playerShadowImage.enabled = true;
+        yield return StartCoroutine(AnimateRectLocalSlide(rt, start, end, 0.30f));
+        rt.localPosition = end;
+    }
+
+    Vector3 GetPlayerSwapOffscreenLocalPos(float y, float z)
+    {
+        float arenaWidth = arenaPanel != null ? arenaPanel.rect.width : Screen.width;
+        float offscreenX = -Mathf.Max(460f, arenaWidth * 0.58f);
+        return new Vector3(offscreenX, y, z);
+    }
+
+    IEnumerator AnimateRectLocalSlide(RectTransform rt, Vector3 from, Vector3 to, float duration)
+    {
+        if (rt == null) yield break;
+        float total = Mathf.Max(0.01f, duration);
+        float t = 0f;
+        while (t < total)
+        {
+            t += Time.deltaTime;
+            float p = Mathf.Clamp01(t / total);
+            float eased = 1f - Mathf.Pow(1f - p, 3f);
+            rt.localPosition = Vector3.LerpUnclamped(from, to, eased);
+            yield return null;
+        }
+        rt.localPosition = to;
     }
 
     void OnSwapExitPressed()
@@ -2281,15 +2342,15 @@ public class BattleSystem : MonoBehaviour
 
         float clamped = Mathf.Clamp01(ratio);
         hpFill.fillAmount = clamped;
-        // Pokemon-like tier steps:
-        // 100% = green, 75% = light green, 50% = orange, 25% and below = red.
+        // Requested tiers:
+        // 100%-75% = green, 75%-50% = yellow, 50%-25% = orange, 25% and below = red.
         if (clamped > 0.75f)
         {
             hpFill.color = HpGreen;
         }
         else if (clamped > 0.5f)
         {
-            hpFill.color = HpLightGreen;
+            hpFill.color = HpYellow;
         }
         else if (clamped > 0.25f)
         {
