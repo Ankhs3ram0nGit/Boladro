@@ -129,6 +129,8 @@ public class OverworldCreatureSpawner : MonoBehaviour
     private float playerSpeed;
     private float lastPlayerMotionSampleTime;
     private bool hasPlayerMotionSample;
+    private Camera cachedMainCamera;
+    private float nextMainCameraLookupAt;
 
     void OnEnable()
     {
@@ -462,7 +464,7 @@ public class OverworldCreatureSpawner : MonoBehaviour
 
     bool IsInsideMainCameraView(Vector2 worldPoint, float paddingWorld)
     {
-        Camera cam = Camera.main;
+        Camera cam = GetMainCamera();
         if (cam == null) return false;
 
         Vector3 camPos = cam.transform.position;
@@ -485,6 +487,16 @@ public class OverworldCreatureSpawner : MonoBehaviour
                viewport.x <= 1.01f &&
                viewport.y >= -0.01f &&
                viewport.y <= 1.01f;
+    }
+
+    Camera GetMainCamera()
+    {
+        if (cachedMainCamera != null) return cachedMainCamera;
+        if (Time.time < nextMainCameraLookupAt) return null;
+
+        nextMainCameraLookupAt = Time.time + 0.5f;
+        cachedMainCamera = Camera.main;
+        return cachedMainCamera;
     }
 
     bool IsBlocked(Vector2 point, Collider2D zoneCollider)
@@ -702,10 +714,8 @@ public class OverworldCreatureSpawner : MonoBehaviour
             }
         }
 
-        WorldSpawnMarker[] markers = FindObjectsByType<WorldSpawnMarker>(FindObjectsSortMode.None);
-        for (int i = 0; i < markers.Length; i++)
+        foreach (WorldSpawnMarker marker in WorldSpawnMarker.ActiveMarkers)
         {
-            WorldSpawnMarker marker = markers[i];
             if (marker == null || !marker.gameObject.activeInHierarchy) continue;
 
             WildCreatureAI ai = marker.GetComponent<WildCreatureAI>();

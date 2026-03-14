@@ -12,6 +12,8 @@ public class PlantShadowStyleBootstrap : MonoBehaviour
 {
     public string shadowSheetPath = "Assets/Cainos/Pixel Art Top Down - Basic/Texture/TX Shadow Plant.png";
     public float refreshIntervalSeconds = 0.35f;
+    public bool periodicRefreshInPlayMode = false;
+    public bool periodicRefreshInEditMode = true;
     public bool setShadowIgnoreFade = true;
     public int shadowSortingLayerId = 0;
     public int shadowSortingOrder = -999;
@@ -64,6 +66,8 @@ public class PlantShadowStyleBootstrap : MonoBehaviour
 
     private void Update()
     {
+        bool shouldRefresh = Application.isPlaying ? periodicRefreshInPlayMode : periodicRefreshInEditMode;
+        if (!shouldRefresh) return;
         if (Time.realtimeSinceStartup < nextRefreshAt) return;
         nextRefreshAt = Time.realtimeSinceStartup + Mathf.Max(0.1f, refreshIntervalSeconds);
         ApplyNow();

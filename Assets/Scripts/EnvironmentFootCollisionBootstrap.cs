@@ -19,6 +19,9 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
 {
     private static EnvironmentFootCollisionBootstrap instance;
     private float nextScanAt;
+    public bool periodicRefreshInPlayMode = false;
+    public bool periodicRefreshInEditMode = true;
+    [Min(0.1f)] public float refreshIntervalSeconds = 1.0f;
     public float tileWorldSize = 1f;
     public float treeColliderTileOffset = 3f;
     public bool useTreeTemplateCollider = true;
@@ -51,12 +54,15 @@ public class EnvironmentFootCollisionBootstrap : MonoBehaviour
     private void OnEnable()
     {
         nextScanAt = 0f;
+        ApplyFootColliders();
     }
 
     private void Update()
     {
+        bool shouldRefresh = Application.isPlaying ? periodicRefreshInPlayMode : periodicRefreshInEditMode;
+        if (!shouldRefresh) return;
         if (Time.realtimeSinceStartup < nextScanAt) return;
-        nextScanAt = Time.realtimeSinceStartup + 1.0f;
+        nextScanAt = Time.realtimeSinceStartup + Mathf.Max(0.1f, refreshIntervalSeconds);
         ApplyFootColliders();
     }
 

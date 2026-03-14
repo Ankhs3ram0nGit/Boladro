@@ -9,6 +9,9 @@ public class WhelplingAnimationBootstrap : MonoBehaviour
 {
     private static WhelplingAnimationBootstrap instance;
     private float nextScanAt;
+    public bool periodicRefreshInPlayMode = false;
+    public bool periodicRefreshInEditMode = true;
+    [Min(0.1f)] public float refreshIntervalSeconds = 1.0f;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void RuntimeBoot()
@@ -37,12 +40,15 @@ public class WhelplingAnimationBootstrap : MonoBehaviour
     private void OnEnable()
     {
         nextScanAt = 0f;
+        ApplyToWhelplings();
     }
 
     private void Update()
     {
+        bool shouldRefresh = Application.isPlaying ? periodicRefreshInPlayMode : periodicRefreshInEditMode;
+        if (!shouldRefresh) return;
         if (Time.realtimeSinceStartup < nextScanAt) return;
-        nextScanAt = Time.realtimeSinceStartup + 1.0f;
+        nextScanAt = Time.realtimeSinceStartup + Mathf.Max(0.1f, refreshIntervalSeconds);
         ApplyToWhelplings();
     }
 

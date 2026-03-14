@@ -9,7 +9,7 @@ using UnityEditor;
 public class WorldRockSpriteNormalizer : MonoBehaviour
 {
     public bool applyOnEnable = true;
-    public bool periodicReapplyInPlayMode = true;
+    public bool periodicReapplyInPlayMode = false;
     [Min(0.2f)] public float reapplyIntervalSeconds = 2.5f;
 
     private const string PropsTexturePath = "Assets/Cainos/Pixel Art Top Down - Basic/Texture/TX Props.png";

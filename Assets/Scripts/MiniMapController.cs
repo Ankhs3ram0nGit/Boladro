@@ -17,6 +17,10 @@ public class MiniMapController : MonoBehaviour
     [Min(64)] public int renderTextureSize = 256;
     public Color minimapClearColor = new Color(0f, 0f, 0f, 0f);
 
+    [Header("Performance")]
+    [Min(1f)] public float minimapRenderFps = 10f;
+    [Min(0f)] public float minimapRenderMoveThreshold = 0.04f;
+
     [Header("Player Marker")]
     public float markerOuterSize = 16f;
     public float markerInnerSize = 10f;
@@ -43,6 +47,10 @@ public class MiniMapController : MonoBehaviour
     private Canvas canvas;
     private Sprite circleSprite;
     private float nextCreatureScanAt;
+    private float nextMinimapRenderAt;
+    private Vector2 lastRenderedPlayerPos;
+    private bool hasRenderedMinimapFrame;
+    private bool minimapVisible = true;
 
     private class CreatureBlip
     {
@@ -54,6 +62,7 @@ public class MiniMapController : MonoBehaviour
 
     private readonly Dictionary<int, CreatureBlip> creatureBlips = new Dictionary<int, CreatureBlip>();
     private readonly List<int> staleCreatureKeys = new List<int>();
+    private readonly List<WorldSpawnMarker> markerBuffer = new List<WorldSpawnMarker>(64);
 
     void OnEnable()
     {
@@ -75,8 +84,7 @@ public class MiniMapController : MonoBehaviour
         SetMiniMapVisible(true);
 
         if (minimapCamera == null) return;
-        Vector3 p = transform.position;
-        minimapCamera.transform.position = new Vector3(p.x, p.y, minimapCameraZ);
+        RenderMinimapIfNeeded(false);
         UpdateCreatureBlips();
     }
 
@@ -146,6 +154,7 @@ public class MiniMapController : MonoBehaviour
             minimapCamera.depth = -50f;
             minimapCamera.allowHDR = false;
             minimapCamera.allowMSAA = false;
+            minimapCamera.enabled = false; // Manual render at throttled cadence.
         }
 
         if (minimapTexture == null ||
@@ -166,6 +175,7 @@ public class MiniMapController : MonoBehaviour
         }
 
         minimapCamera.targetTexture = minimapTexture;
+        RequestMinimapRender();
     }
 
     void EnsureMinimapUi()
@@ -224,6 +234,7 @@ public class MiniMapController : MonoBehaviour
         EnsureCreatureBlipLayer(mapRectTransform);
 
         EnsurePlayerMarker(rootRect);
+        RequestMinimapRender();
     }
 
     void EnsureCreatureBlipLayer(RectTransform mapRect)
@@ -299,10 +310,16 @@ public class MiniMapController : MonoBehaviour
             staleCreatureKeys.Add(pair.Key);
         }
 
-        WorldSpawnMarker[] markers = FindObjectsByType<WorldSpawnMarker>(FindObjectsSortMode.None);
-        for (int i = 0; i < markers.Length; i++)
+        markerBuffer.Clear();
+        foreach (WorldSpawnMarker marker in WorldSpawnMarker.ActiveMarkers)
         {
-            WorldSpawnMarker marker = markers[i];
+            if (marker == null) continue;
+            markerBuffer.Add(marker);
+        }
+
+        for (int i = 0; i < markerBuffer.Count; i++)
+        {
+            WorldSpawnMarker marker = markerBuffer[i];
             if (marker == null || marker.transform == null) continue;
             if (!marker.gameObject.activeInHierarchy) continue;
 
@@ -342,6 +359,36 @@ public class MiniMapController : MonoBehaviour
             creatureBlips.Remove(key);
         }
         staleCreatureKeys.Clear();
+    }
+
+    void RenderMinimapIfNeeded(bool force)
+    {
+        if (minimapCamera == null || minimapTexture == null) return;
+        if (!minimapVisible) return;
+
+        Vector2 playerPos = transform.position;
+        float threshold = Mathf.Max(0f, minimapRenderMoveThreshold);
+        float thresholdSqr = threshold * threshold;
+        bool moved = !hasRenderedMinimapFrame || ((playerPos - lastRenderedPlayerPos).sqrMagnitude >= thresholdSqr);
+
+        float fps = Mathf.Max(1f, minimapRenderFps);
+        bool timeReady = Time.unscaledTime >= nextMinimapRenderAt;
+
+        if (!force && !moved && !timeReady) return;
+
+        minimapCamera.orthographicSize = Mathf.Max(1f, minimapOrthographicSize);
+        minimapCamera.transform.position = new Vector3(playerPos.x, playerPos.y, minimapCameraZ);
+        minimapCamera.Render();
+
+        hasRenderedMinimapFrame = true;
+        lastRenderedPlayerPos = playerPos;
+        nextMinimapRenderAt = Time.unscaledTime + (1f / fps);
+    }
+
+    void RequestMinimapRender()
+    {
+        hasRenderedMinimapFrame = false;
+        nextMinimapRenderAt = 0f;
     }
 
     CreatureBlip CreateCreatureBlip(int key)
@@ -438,10 +485,18 @@ public class MiniMapController : MonoBehaviour
 
     void SetMiniMapVisible(bool visible)
     {
-        if (minimapCamera != null) minimapCamera.enabled = visible;
+        bool wasVisible = minimapVisible;
+        minimapVisible = visible;
+        if (minimapCamera != null) minimapCamera.enabled = false;
         if (rootRect != null && rootRect.gameObject.activeSelf != visible)
         {
             rootRect.gameObject.SetActive(visible);
+        }
+
+        if (visible && !wasVisible)
+        {
+            RequestMinimapRender();
+            RenderMinimapIfNeeded(true);
         }
     }
 }
