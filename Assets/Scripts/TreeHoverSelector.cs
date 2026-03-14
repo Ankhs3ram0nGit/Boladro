@@ -13,6 +13,10 @@ public class TreeHoverSelector : MonoBehaviour
 {
     private const string SelectorObjectName = "__HoverSelectorFX";
     private static readonly string[] SelectorFrameNames = { "Frame_0", "Frame_1", "Frame_2", "Frame_3" };
+    private const string PickaxeHitSfxBasePath = "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNMisc_HIT-Spell Hit_HY_PC-";
+    private const string PickaxeHitSfxSuffix = ".wav";
+    private const int PickaxeHitSfxStart = 1;
+    private const int PickaxeHitSfxEnd = 6;
 
     private const string DefaultStoneSpriteAssetPath = "Assets/Cainos/Pixel Art Top Down - Basic/Texture/TX Props.png";
     private const string DefaultStoneSpriteName = "TX Props - Stone 06";
@@ -86,6 +90,10 @@ public class TreeHoverSelector : MonoBehaviour
     public float woodCollectTargetYOffset = 0.45f;
     public int woodCollectSortingBoost = 60;
 
+    [Header("Audio")]
+    public AudioClip[] pickaxeHitSfx;
+    [Range(0f, 1f)] public float pickaxeHitSfxVolume = 0.9f;
+
     enum HarvestKind
     {
         Tree,
@@ -149,6 +157,8 @@ public class TreeHoverSelector : MonoBehaviour
 
     private Sprite cachedWoodSprite;
     private Sprite cachedStoneSprite;
+    private AudioSource pickaxeHitSfxSource;
+    private bool attemptedPickaxeHitSfxLoad;
 
     private InventoryModel inventory;
     private PlayerCreatureParty creatureParty;
@@ -166,6 +176,7 @@ public class TreeHoverSelector : MonoBehaviour
 
         EnsureFramesLoaded();
         EnsureSelectorObject();
+        EnsurePickaxeHitAudio();
         RefreshHarvestEntries();
         SetSelectorVisible(false);
     }
@@ -319,6 +330,7 @@ public class TreeHoverSelector : MonoBehaviour
         if (!TryGetMouseWorldPoint(out Vector2 mouseWorld)) return;
         if (!IsPointInsideEntryInteraction(activeHoveredTarget, mouseWorld, out _)) return;
 
+        PlayRandomPickaxeHitSfx();
         if (!ApplyPickaxeDamageToTarget(activeHoveredTarget))
         {
             return;
@@ -1369,6 +1381,65 @@ public class TreeHoverSelector : MonoBehaviour
         string normalized = string.IsNullOrWhiteSpace(itemId) ? string.Empty : itemId.Trim().ToLowerInvariant();
         if (normalized == "stone") return runtimeStoneItem;
         return runtimeWoodItem;
+    }
+
+    void EnsurePickaxeHitAudio()
+    {
+        if (pickaxeHitSfxSource != null) return;
+        pickaxeHitSfxSource = gameObject.AddComponent<AudioSource>();
+        pickaxeHitSfxSource.playOnAwake = false;
+        pickaxeHitSfxSource.loop = false;
+        pickaxeHitSfxSource.spatialBlend = 0f;
+    }
+
+    void PlayRandomPickaxeHitSfx()
+    {
+        EnsurePickaxeHitAudio();
+        EnsurePickaxeHitSfxLoaded();
+
+        if (pickaxeHitSfxSource == null || pickaxeHitSfx == null || pickaxeHitSfx.Length == 0) return;
+
+        List<AudioClip> valid = null;
+        for (int i = 0; i < pickaxeHitSfx.Length; i++)
+        {
+            if (pickaxeHitSfx[i] == null) continue;
+            if (valid == null) valid = new List<AudioClip>(pickaxeHitSfx.Length);
+            valid.Add(pickaxeHitSfx[i]);
+        }
+
+        if (valid == null || valid.Count == 0) return;
+        AudioClip clip = valid[UnityEngine.Random.Range(0, valid.Count)];
+        if (clip == null) return;
+        pickaxeHitSfxSource.PlayOneShot(clip, Mathf.Clamp01(pickaxeHitSfxVolume));
+    }
+
+    void EnsurePickaxeHitSfxLoaded()
+    {
+        if (attemptedPickaxeHitSfxLoad) return;
+        attemptedPickaxeHitSfxLoad = true;
+
+        if (pickaxeHitSfx != null)
+        {
+            for (int i = 0; i < pickaxeHitSfx.Length; i++)
+            {
+                if (pickaxeHitSfx[i] != null) return;
+            }
+        }
+
+#if UNITY_EDITOR
+        List<AudioClip> loaded = new List<AudioClip>(PickaxeHitSfxEnd - PickaxeHitSfxStart + 1);
+        for (int i = PickaxeHitSfxStart; i <= PickaxeHitSfxEnd; i++)
+        {
+            string path = PickaxeHitSfxBasePath + i.ToString("000") + PickaxeHitSfxSuffix;
+            AudioClip clip = AssetDatabase.LoadAssetAtPath<AudioClip>(path);
+            if (clip != null) loaded.Add(clip);
+        }
+
+        if (loaded.Count > 0)
+        {
+            pickaxeHitSfx = loaded.ToArray();
+        }
+#endif
     }
 }
 
