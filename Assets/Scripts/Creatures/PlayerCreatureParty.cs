@@ -15,6 +15,7 @@ public class PlayerCreatureParty : MonoBehaviour
 
     [Header("Party")]
     [SerializeField] private List<PartySlot> configuredParty = new List<PartySlot>();
+    [SerializeField, Range(0, 5)] private int activePartyIndex = 0;
 
     [Header("Testing")]
     [Tooltip("Seeds a 6-creature party if none is configured.")]
@@ -34,6 +35,7 @@ public class PlayerCreatureParty : MonoBehaviour
 
     private readonly List<CreatureInstance> activeCreatures = new List<CreatureInstance>();
     public IReadOnlyList<CreatureInstance> ActiveCreatures => activeCreatures;
+    public int ActivePartyIndex => Mathf.Clamp(activePartyIndex, 0, Mathf.Max(0, activeCreatures.Count - 1));
 
     public event Action PartyChanged;
 
@@ -68,6 +70,14 @@ public class PlayerCreatureParty : MonoBehaviour
     {
         SeedTestPartyInternal();
         RebuildActiveCreatures();
+    }
+
+    public void SetActivePartyIndex(int index)
+    {
+        int clamped = Mathf.Clamp(index, 0, Mathf.Max(0, activeCreatures.Count - 1));
+        if (clamped == activePartyIndex) return;
+        activePartyIndex = clamped;
+        PartyChanged?.Invoke();
     }
 
     private void SeedTestPartyInternal()
@@ -156,7 +166,8 @@ public class PlayerCreatureParty : MonoBehaviour
             activeCreatures.Add(instance);
         }
 
+        activePartyIndex = Mathf.Clamp(activePartyIndex, 0, Mathf.Max(0, activeCreatures.Count - 1));
+
         PartyChanged?.Invoke();
     }
 }
-
