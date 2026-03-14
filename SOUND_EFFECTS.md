@@ -44,6 +44,8 @@ This file tracks SFX currently wired in code, plus reserved assignments.
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/FGHTImpt_HIT-Smack_HY_PC-002.wav`
 - Player respawn:
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNSynth_BUFF-Generic Buff_HY_PC-003.wav`
+- Overworld background music (fade-in on overworld start, fade-out on battle start):
+  - `Assets/UI Soundpack/16-Bit Fantasy & Adventure Music [no AI].wav`
 
 ## Reserved / Planned
 
