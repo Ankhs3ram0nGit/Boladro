@@ -10,6 +10,7 @@ public class ActivePartyFollowerController : MonoBehaviour
 
     [Header("Input")]
     public Key cyclePartyKey = Key.Q;
+    [Min(0.01f)] public float cycleTapMaxDuration = 0.2f;
     public bool disableCycleDuringBattle = true;
 
     [Header("Follower Movement")]
@@ -46,6 +47,9 @@ public class ActivePartyFollowerController : MonoBehaviour
     private CreatureCombatant followerCombatant;
     private WhelplingBounceAnimator bounceAnimator;
     private Transform followerFeet;
+    private bool cycleKeyDown;
+    private float cycleKeyDownTime;
+    private bool followerSpriteFacesRight = true;
 
     void Awake()
     {
@@ -110,7 +114,20 @@ public class ActivePartyFollowerController : MonoBehaviour
         if (kb == null) return;
 
         KeyControl key = kb[cyclePartyKey];
-        if (key == null || !key.wasPressedThisFrame) return;
+        if (key == null) return;
+
+        if (key.wasPressedThisFrame)
+        {
+            cycleKeyDown = true;
+            cycleKeyDownTime = Time.unscaledTime;
+            return;
+        }
+
+        if (!key.wasReleasedThisFrame || !cycleKeyDown) return;
+        cycleKeyDown = false;
+
+        float heldDuration = Time.unscaledTime - cycleKeyDownTime;
+        if (heldDuration > Mathf.Max(0.01f, cycleTapMaxDuration)) return;
         if (disableCycleDuringBattle && BattleSystem.IsEngagedBattleActive) return;
         if (party == null || party.ActiveCreatures == null) return;
 
@@ -195,7 +212,7 @@ public class ActivePartyFollowerController : MonoBehaviour
         followerAI.hopLandTime = hopLandTime;
         followerAI.hopPauseTime = hopPauseTime;
         followerAI.hopArcHeight = hopArcHeight;
-        followerAI.spriteFacesRight = spriteFacesRight;
+        followerAI.spriteFacesRight = followerSpriteFacesRight;
     }
 
     private void BindFollowerToPlayerHealth()
@@ -236,6 +253,11 @@ public class ActivePartyFollowerController : MonoBehaviour
         followerRenderer.sprite = def.sprite;
         followerRenderer.color = Color.white;
         followerRenderer.flipX = false;
+        followerSpriteFacesRight = spriteFacesRight;
+        if (def.facingDirection.sqrMagnitude > 0.0001f)
+        {
+            followerSpriteFacesRight = def.facingDirection.x >= 0f;
+        }
 
         float baseline = Mathf.Max(0.05f, Mathf.Abs(followerScaleBaseline));
         float scale = Mathf.Max(0.05f, baseline * Mathf.Max(0.05f, def.overworldSizeMultiplier));
@@ -260,11 +282,11 @@ public class ActivePartyFollowerController : MonoBehaviour
     {
         if (followerRenderer == null || followerRoot == null) return;
 
-        float dx = transform.position.x - followerRoot.transform.position.x;
+        float dx = followerRoot.transform.position.x - transform.position.x;
         if (Mathf.Abs(dx) <= 0.0001f) return;
 
-        bool playerIsLeft = dx < 0f;
-        followerRenderer.flipX = spriteFacesRight ? playerIsLeft : !playerIsLeft;
+        bool playerIsRight = dx > 0f;
+        followerRenderer.flipX = followerSpriteFacesRight ? !playerIsRight : playerIsRight;
     }
 
     private static T EnsureComponent<T>(GameObject go) where T : Component

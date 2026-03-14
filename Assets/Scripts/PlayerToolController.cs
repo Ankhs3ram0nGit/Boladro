@@ -60,6 +60,10 @@ public class PlayerToolController : MonoBehaviour
 
     void Awake()
     {
+        // Keep held tool tightly coupled to player draw order to avoid cross-layer clipping.
+        useAbsoluteTopSortingOrder = false;
+        if (sortingOrderOffset < 1) sortingOrderOffset = 1;
+
         inventory = GetComponent<InventoryModel>();
         playerMover = GetComponent<PlayerMover>();
         playerRenderer = GetComponent<SpriteRenderer>();
@@ -429,9 +433,8 @@ public class PlayerToolController : MonoBehaviour
     {
         if (heldToolRenderer == null || playerRenderer == null) return;
         heldToolRenderer.sortingLayerID = playerRenderer.sortingLayerID;
-        heldToolRenderer.sortingOrder = useAbsoluteTopSortingOrder
-            ? Mathf.Clamp(absoluteTopSortingOrder, -32768, 32767)
-            : (playerRenderer.sortingOrder + sortingOrderOffset);
+        int effectiveOffset = Mathf.Max(1, sortingOrderOffset);
+        heldToolRenderer.sortingOrder = Mathf.Clamp(playerRenderer.sortingOrder + effectiveOffset, -32768, 32767);
     }
 
     Sprite ResolveHeldDisplaySprite(Sprite source, bool facingLeft)

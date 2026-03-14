@@ -40,7 +40,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
     public Vector2 collapsedIconSize = new Vector2(52f, 52f);
     public Vector2 expandedIconSize = new Vector2(60f, 60f);
     public float spacing = 6f;
-    [Min(1f)] public float expandAnimationSpeed = 10f;
+    [Min(0.5f)] public float expandAnimationSpeed = 6f;
+    [Range(0.1f, 1f)] public float holdExpandSpeedMultiplier = 0.28f;
     [Range(0f, 1f)] public float expandedInfoThreshold = 0.6f;
 
     [Header("Interaction")]
@@ -63,6 +64,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
     public Color hpBarFillColor = new Color(0.18f, 0.92f, 0.22f, 1f);
     public Color xpBarBackColor = new Color(0f, 0f, 0f, 0.55f);
     public Color xpBarFillColor = new Color(0.30f, 0.75f, 1f, 1f);
+    public Color barOutlineColor = Color.black;
+    [Range(0.5f, 2f)] public float barOutlineThickness = 1f;
 
     [Header("Face Crop")]
     [Range(0.3f, 1f)] public float faceCropWidthRatio = 0.92f;
@@ -405,7 +408,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
     private Image CreateBar(string name, RectTransform parent, Color color, Vector2 anchorMin, Vector2 anchorMax)
     {
-        GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Outline));
         go.transform.SetParent(parent, false);
 
         RectTransform rt = go.GetComponent<RectTransform>();
@@ -418,6 +421,11 @@ public class CreaturePartySidebarUI : MonoBehaviour
         Image img = go.GetComponent<Image>();
         img.color = color;
         img.raycastTarget = false;
+
+        Outline outline = go.GetComponent<Outline>();
+        outline.effectColor = barOutlineColor;
+        outline.effectDistance = new Vector2(barOutlineThickness, barOutlineThickness);
+        outline.useGraphicAlpha = true;
 
         return img;
     }
@@ -523,7 +531,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
         if (builtSlots.Count == 0) return;
 
         float dt = Application.isPlaying ? Time.unscaledDeltaTime : Time.deltaTime;
-        float step = Mathf.Max(1f, expandAnimationSpeed) * dt;
+        float baseSpeed = Mathf.Max(0.5f, expandAnimationSpeed);
+        float holdSpeed = baseSpeed * Mathf.Clamp(holdExpandSpeedMultiplier, 0.1f, 1f);
 
         for (int i = 0; i < builtSlots.Count; i++)
         {
@@ -534,6 +543,12 @@ public class CreaturePartySidebarUI : MonoBehaviour
             if (view == null) continue;
 
             bool expandedTarget = view.isActive || expandAllHeld;
+            float speed = baseSpeed;
+            if (expandAllHeld && !view.isActive && expandedTarget)
+            {
+                speed = holdSpeed;
+            }
+            float step = speed * dt;
             view.expandT = Mathf.MoveTowards(view.expandT, expandedTarget ? 1f : 0f, step);
 
             Vector2 slotDims = Vector2.Lerp(collapsedSlotSize, expandedSlotSize, view.expandT);
