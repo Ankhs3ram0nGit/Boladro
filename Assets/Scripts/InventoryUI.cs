@@ -91,6 +91,7 @@ public class InventoryUI : MonoBehaviour
     private Text creatureDetailBodyText;
     private Button creatureEvolveButton;
     private Text creatureEvolveButtonLabel;
+    private Sprite creatureEvolveButtonSprite;
     private Button creatureSummaryTabButton;
     private Button creatureAttacksTabButton;
     private Button creatureSoulTraitsTabButton;
@@ -1497,8 +1498,10 @@ public class InventoryUI : MonoBehaviour
         }
 
         Image bg = tf.GetComponent<Image>();
-        bg.sprite = slotSprite;
-        bg.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+        Sprite evolveSprite = ResolveEvolveButtonSprite();
+        bg.sprite = evolveSprite != null ? evolveSprite : slotSprite;
+        Sprite useSprite = bg.sprite;
+        bg.type = useSprite != null && useSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
         bg.color = new Color(0.20f, 0.20f, 0.24f, 0.95f);
 
         LayoutElement le = tf.GetComponent<LayoutElement>();
@@ -1531,6 +1534,18 @@ public class InventoryUI : MonoBehaviour
         trt.offsetMin = Vector2.zero;
         trt.offsetMax = Vector2.zero;
         return b;
+    }
+
+    Sprite ResolveEvolveButtonSprite()
+    {
+#if UNITY_EDITOR
+        if (creatureEvolveButtonSprite == null)
+        {
+            creatureEvolveButtonSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_2.png");
+        }
+#endif
+        return creatureEvolveButtonSprite;
     }
 
     Text EnsureDetailText(RectTransform parent, string name, int fontSize, TextAnchor anchor, FontStyle style)
@@ -1972,6 +1987,33 @@ public class InventoryUI : MonoBehaviour
             float y = creatureGridRoot != null ? -(creatureGridRoot.sizeDelta.y + 10f) : -10f;
             creaturePagerRoot.anchoredPosition = new Vector2(0f, y);
             creaturePagerRoot.sizeDelta = new Vector2(350f, 38f);
+
+            if (creaturePrevPageButton != null)
+            {
+                RectTransform rt = creaturePrevPageButton.GetComponent<RectTransform>();
+                if (rt != null) rt.sizeDelta = new Vector2(6f, 4f);
+                LayoutElement le = creaturePrevPageButton.GetComponent<LayoutElement>();
+                if (le != null)
+                {
+                    le.preferredWidth = 6f;
+                    le.preferredHeight = 4f;
+                    le.minWidth = 6f;
+                    le.minHeight = 4f;
+                }
+            }
+            if (creatureNextPageButton != null)
+            {
+                RectTransform rt = creatureNextPageButton.GetComponent<RectTransform>();
+                if (rt != null) rt.sizeDelta = new Vector2(6f, 4f);
+                LayoutElement le = creatureNextPageButton.GetComponent<LayoutElement>();
+                if (le != null)
+                {
+                    le.preferredWidth = 6f;
+                    le.preferredHeight = 4f;
+                    le.minWidth = 6f;
+                    le.minHeight = 4f;
+                }
+            }
         }
 
         if (creatureRightPanelRoot != null && creatureTabRoot != null && creatureGridRoot != null)
@@ -2082,14 +2124,14 @@ public class InventoryUI : MonoBehaviour
                 creatureSubTabsRoot.anchorMin = new Vector2(0f, 1f);
                 creatureSubTabsRoot.anchorMax = new Vector2(1f, 1f);
                 creatureSubTabsRoot.pivot = new Vector2(0f, 1f);
-                creatureSubTabsRoot.anchoredPosition = new Vector2(12f, -126f);
+                creatureSubTabsRoot.anchoredPosition = new Vector2(28f, -126f);
                 creatureSubTabsRoot.sizeDelta = new Vector2(0f, 26f);
             }
             if (creatureDetailContentRoot != null)
             {
                 creatureDetailContentRoot.anchorMin = new Vector2(0f, 0f);
                 creatureDetailContentRoot.anchorMax = new Vector2(1f, 1f);
-                creatureDetailContentRoot.offsetMin = new Vector2(8f, 42f);
+                creatureDetailContentRoot.offsetMin = new Vector2(24f, 42f);
                 creatureDetailContentRoot.offsetMax = new Vector2(-8f, -158f);
             }
             if (creatureDetailBodyText != null)
@@ -2103,11 +2145,11 @@ public class InventoryUI : MonoBehaviour
             if (creatureEvolveButton != null)
             {
                 RectTransform rt = creatureEvolveButton.GetComponent<RectTransform>();
-                rt.anchorMin = new Vector2(0f, 0f);
-                rt.anchorMax = new Vector2(0f, 0f);
-                rt.pivot = new Vector2(0f, 0f);
-                rt.anchoredPosition = new Vector2(8f, 8f);
-                rt.sizeDelta = new Vector2(132f, 26f);
+                rt.anchorMin = new Vector2(0.5f, 0f);
+                rt.anchorMax = new Vector2(0.5f, 0f);
+                rt.pivot = new Vector2(0.5f, 0f);
+                rt.anchoredPosition = new Vector2(0f, 8f);
+                rt.sizeDelta = new Vector2(186f, 34f);
                 rt.SetAsLastSibling();
             }
         }
@@ -2423,12 +2465,12 @@ public class InventoryUI : MonoBehaviour
             Image bg = creatureEvolveButton.GetComponent<Image>();
             if (bg != null)
             {
-                bg.color = canEvolve ? new Color(0.33f, 0.58f, 0.28f, 0.95f) : new Color(0.25f, 0.25f, 0.25f, 0.75f);
+                bg.color = canEvolve ? new Color(1f, 1f, 1f, 0.95f) : new Color(0.45f, 0.45f, 0.45f, 0.85f);
             }
         }
         if (creatureEvolveButtonLabel != null)
         {
-            creatureEvolveButtonLabel.text = canEvolve ? "Evolve" : "Evolve (Locked)";
+            creatureEvolveButtonLabel.text = "Evolve";
         }
     }
 
