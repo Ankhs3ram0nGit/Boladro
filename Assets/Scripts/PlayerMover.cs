@@ -33,7 +33,7 @@ public class PlayerMover : MonoBehaviour
     public AudioClip dodgeRollSfx;
     public AudioClip[] walkingStepSfx;
     [Range(0f, 1f)] public float dodgeRollSfxVolume = 0.85f;
-    [Range(0f, 1f)] public float walkSfxVolume = 0.11f;
+    [Range(0f, 1f)] public float walkSfxVolume = 0.077f;
     [Min(0.05f)] public float walkSfxInterval = 0.23f;
 
     private Rigidbody2D rb;
@@ -78,6 +78,10 @@ public class PlayerMover : MonoBehaviour
         EnsureRollVisual();
         ShowRootVisual();
         battleSystem = GetComponent<BattleSystem>();
+        if (Mathf.Abs(walkSfxVolume - 0.11f) <= 0.0001f)
+        {
+            walkSfxVolume = 0.077f;
+        }
         EnsureMovementAudioSource();
         EnsureMovementAudioAssets();
 

@@ -7,12 +7,16 @@ using UnityEditor;
 
 public class PlayerHealth : MonoBehaviour
 {
+    private const string RespawnSfxPath = "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNSynth_BUFF-Generic Buff_HY_PC-003.wav";
+
     public int maxHealth = 10;
     public int currentHealth = 10;
     public bool debugDamageKey = true;
     public Transform followerToTeleport;
     public Vector3 followerRespawnOffset = new Vector3(-0.6f, 0.2f, 0f);
     public AudioClip playerDamageSfx;
+    public AudioClip respawnSfx;
+    [Range(0f, 1f)] public float respawnSfxVolume = 0.9f;
 
     public event Action<int, int> OnHealthChanged;
     public event Action OnDied;
@@ -143,6 +147,7 @@ public class PlayerHealth : MonoBehaviour
         }
 
         NotifyHealth();
+        PlayRespawnSfx();
         if (OnRespawned != null) OnRespawned.Invoke();
     }
 
@@ -180,6 +185,10 @@ public class PlayerHealth : MonoBehaviour
             playerDamageSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(
                 "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/Stereo/mp3/JDSherbert - Ultimate UI SFX Pack - Error - 1.mp3");
         }
+        if (respawnSfx == null)
+        {
+            respawnSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(RespawnSfxPath);
+        }
 #endif
     }
 
@@ -200,5 +209,13 @@ public class PlayerHealth : MonoBehaviour
         EnsureDamageAudioSource();
         if (damageSfxSource == null) return;
         damageSfxSource.PlayOneShot(playerDamageSfx);
+    }
+
+    void PlayRespawnSfx()
+    {
+        if (respawnSfx == null) return;
+        EnsureDamageAudioSource();
+        if (damageSfxSource == null) return;
+        damageSfxSource.PlayOneShot(respawnSfx, Mathf.Clamp01(respawnSfxVolume));
     }
 }

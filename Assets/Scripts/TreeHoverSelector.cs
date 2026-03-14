@@ -17,6 +17,8 @@ public class TreeHoverSelector : MonoBehaviour
     private const string PickaxeHitSfxSuffix = ".wav";
     private const int PickaxeHitSfxStart = 1;
     private const int PickaxeHitSfxEnd = 6;
+    private const string PickupSfxPath = "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNMisc_STEP-Bubblier Step_HY_PC-003.wav";
+    private const string HarvestBreakSfxPath = "Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/FGHTImpt_HIT-Smack_HY_PC-002.wav";
 
     private const string DefaultStoneSpriteAssetPath = "Assets/Cainos/Pixel Art Top Down - Basic/Texture/TX Props.png";
     private const string DefaultStoneSpriteName = "TX Props - Stone 06";
@@ -91,12 +93,16 @@ public class TreeHoverSelector : MonoBehaviour
     public int woodCollectSortingBoost = 60;
 
     [Header("Drop Idle Float")]
-    [Min(0f)] public float dropFloatAmplitude = 0.045f;
-    [Min(0.01f)] public float dropFloatSpeed = 1.35f;
+    [Min(0f)] public float dropFloatAmplitude = 0.075f;
+    [Min(0.01f)] public float dropFloatSpeed = 2.1f;
 
     [Header("Audio")]
     public AudioClip[] pickaxeHitSfx;
     [Range(0f, 1f)] public float pickaxeHitSfxVolume = 0.78f;
+    public AudioClip resourcePickupSfx;
+    public AudioClip resourceBreakSfx;
+    [Range(0f, 1f)] public float resourcePickupSfxVolume = 0.86f;
+    [Range(0f, 1f)] public float resourceBreakSfxVolume = 0.9f;
 
     enum HarvestKind
     {
@@ -164,7 +170,9 @@ public class TreeHoverSelector : MonoBehaviour
     private Sprite cachedWoodSprite;
     private Sprite cachedStoneSprite;
     private AudioSource pickaxeHitSfxSource;
+    private AudioSource harvestEventSfxSource;
     private bool attemptedPickaxeHitSfxLoad;
+    private bool attemptedHarvestEventSfxLoad;
 
     private InventoryModel inventory;
     private PlayerCreatureParty creatureParty;
@@ -178,6 +186,14 @@ public class TreeHoverSelector : MonoBehaviour
         {
             pickaxeHitSfxVolume = 0.78f;
         }
+        if (Mathf.Abs(dropFloatAmplitude - 0.045f) <= 0.0001f)
+        {
+            dropFloatAmplitude = 0.075f;
+        }
+        if (Mathf.Abs(dropFloatSpeed - 1.35f) <= 0.0001f)
+        {
+            dropFloatSpeed = 2.1f;
+        }
 
         toolController = GetComponent<PlayerToolController>();
         inventory = GetComponent<InventoryModel>();
@@ -188,6 +204,7 @@ public class TreeHoverSelector : MonoBehaviour
         EnsureFramesLoaded();
         EnsureSelectorObject();
         EnsurePickaxeHitAudio();
+        EnsureHarvestEventAudio();
         RefreshHarvestEntries();
         SetSelectorVisible(false);
     }
@@ -993,6 +1010,7 @@ public class TreeHoverSelector : MonoBehaviour
         }
 
         GrantHarvestExperience(target.kind);
+        PlayHarvestBreakSfx();
 
         if (activeSquashRoutines.TryGetValue(id, out Coroutine running) && running != null)
         {
@@ -1303,6 +1321,7 @@ public class TreeHoverSelector : MonoBehaviour
         drop.collectStart = drop.root.position;
         drop.collectTarget = ResolveCurrentCollectTarget(drop);
         SetDropCollectSorting(drop);
+        PlayResourcePickupSfx();
     }
 
     bool UpdateDropCollectAnimation(ResourceDropEntry drop)
@@ -1425,6 +1444,15 @@ public class TreeHoverSelector : MonoBehaviour
         pickaxeHitSfxSource.spatialBlend = 0f;
     }
 
+    void EnsureHarvestEventAudio()
+    {
+        if (harvestEventSfxSource != null) return;
+        harvestEventSfxSource = gameObject.AddComponent<AudioSource>();
+        harvestEventSfxSource.playOnAwake = false;
+        harvestEventSfxSource.loop = false;
+        harvestEventSfxSource.spatialBlend = 0f;
+    }
+
     void PlayRandomPickaxeHitSfx()
     {
         EnsurePickaxeHitAudio();
@@ -1473,6 +1501,40 @@ public class TreeHoverSelector : MonoBehaviour
             pickaxeHitSfx = loaded.ToArray();
         }
 #endif
+    }
+
+    void EnsureHarvestEventSfxLoaded()
+    {
+        if (attemptedHarvestEventSfxLoad) return;
+        attemptedHarvestEventSfxLoad = true;
+
+        if (resourcePickupSfx != null && resourceBreakSfx != null) return;
+#if UNITY_EDITOR
+        if (resourcePickupSfx == null)
+        {
+            resourcePickupSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(PickupSfxPath);
+        }
+        if (resourceBreakSfx == null)
+        {
+            resourceBreakSfx = AssetDatabase.LoadAssetAtPath<AudioClip>(HarvestBreakSfxPath);
+        }
+#endif
+    }
+
+    void PlayResourcePickupSfx()
+    {
+        EnsureHarvestEventAudio();
+        EnsureHarvestEventSfxLoaded();
+        if (harvestEventSfxSource == null || resourcePickupSfx == null) return;
+        harvestEventSfxSource.PlayOneShot(resourcePickupSfx, Mathf.Clamp01(resourcePickupSfxVolume));
+    }
+
+    void PlayHarvestBreakSfx()
+    {
+        EnsureHarvestEventAudio();
+        EnsureHarvestEventSfxLoaded();
+        if (harvestEventSfxSource == null || resourceBreakSfx == null) return;
+        harvestEventSfxSource.PlayOneShot(resourceBreakSfx, Mathf.Clamp01(resourceBreakSfxVolume));
     }
 }
 

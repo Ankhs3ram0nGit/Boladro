@@ -34,6 +34,16 @@ This file tracks SFX currently wired in code, plus reserved assignments.
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_STEP-Magic Step_HY_PC-006.wav`
 - Hotbar mouse-wheel slot scroll:
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNTonl_USABLE-Toony Zap_HY_PC-001.wav`
+- UI button hover:
+  - `Assets/UI Soundpack/MP3/Abstract1.mp3`
+- UI button click:
+  - `Assets/UI Soundpack/MP3/Retro12.mp3`
+- Item pickup (resource collect):
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNMisc_STEP-Bubblier Step_HY_PC-003.wav`
+- Harvestable destroyed (tree/stone):
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/FGHTImpt_HIT-Smack_HY_PC-002.wav`
+- Player respawn:
+  - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNSynth_BUFF-Generic Buff_HY_PC-003.wav`
 
 ## Reserved / Planned
 
