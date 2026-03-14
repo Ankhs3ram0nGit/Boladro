@@ -217,10 +217,7 @@ public class BattleSystem : MonoBehaviour
         playerMover = GetComponent<PlayerMover>();
         playerHealth = GetComponent<PlayerHealth>();
         EnsurePlayerPartySource();
-        if (playerParty != null)
-        {
-            playerParty.TrySetActiveToFirstAlive();
-        }
+        EnsureActivePartySlotIsUsable();
 
         AutoFindUI();
 
@@ -352,6 +349,43 @@ public class BattleSystem : MonoBehaviour
         {
             playerParty.InitializeParty();
         }
+    }
+
+    bool EnsureActivePartySlotIsUsable()
+    {
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0)
+        {
+            return false;
+        }
+
+        int activeIndex = Mathf.Clamp(playerParty.ActivePartyIndex, 0, playerParty.ActiveCreatures.Count - 1);
+        CreatureInstance active = playerParty.ActiveCreatures[activeIndex];
+        if (active != null && active.currentHP > 0)
+        {
+            return true;
+        }
+
+        int firstAlive = playerParty.FindFirstAlivePartyIndex();
+        if (firstAlive < 0) return false;
+
+        if (firstAlive != activeIndex)
+        {
+            playerParty.SetActivePartyIndex(firstAlive);
+        }
+        return true;
+    }
+
+    CreatureInstance GetActivePartyInstance()
+    {
+        EnsurePlayerPartySource();
+        if (playerParty == null || playerParty.ActiveCreatures == null || playerParty.ActiveCreatures.Count == 0)
+        {
+            return null;
+        }
+
+        int idx = Mathf.Clamp(playerParty.ActivePartyIndex, 0, playerParty.ActiveCreatures.Count - 1);
+        return playerParty.ActiveCreatures[idx];
     }
 
     void EnsureSwapMenuSprites()
@@ -629,12 +663,11 @@ public class BattleSystem : MonoBehaviour
         EnsurePlayerPartySource();
         if (playerParty != null)
         {
-            if (!playerParty.HasAnyAliveCreatures())
+            if (!playerParty.HasAnyAliveCreatures() || !EnsureActivePartySlotIsUsable())
             {
                 SetEngageDebug("Engage blocked: all party creatures are fainted.");
                 return false;
             }
-            playerParty.TrySetActiveToFirstAlive();
         }
 
         const float strictEncounterRangeTiles = 5f;
@@ -920,9 +953,20 @@ public class BattleSystem : MonoBehaviour
         }
 
         EnsurePlayerPartySource();
-        if (playerParty != null)
+        if (playerParty != null && !EnsureActivePartySlotIsUsable())
         {
-            playerParty.TrySetActiveToFirstAlive();
+            inBattle = false;
+            IsEngagedBattleActive = false;
+            waitingForPlayerMove = false;
+            turnResolutionInProgress = false;
+            if (enemyAI != null)
+            {
+                enemyAI.ExitBattle();
+            }
+            if (playerMover != null) playerMover.enabled = true;
+            SetMessage("All party creatures are fainted.");
+            RefreshTurnInputState();
+            return;
         }
 
         playerCreature = ResolvePlayerCombatant();
@@ -983,16 +1027,44 @@ public class BattleSystem : MonoBehaviour
 
     CreatureCombatant ResolvePlayerCombatant()
     {
-        if (IsValidCombatant(playerCreature)) return playerCreature;
-
-        if (ActivePartyFollowerController.Instance != null)
+        CreatureInstance activePartyInstance = GetActivePartyInstance();
+        if (activePartyInstance != null)
         {
-            CreatureCombatant activeFollowerCombatant = ActivePartyFollowerController.Instance.CurrentFollowerCombatant;
-            if (IsValidCombatant(activeFollowerCombatant))
+            if (ActivePartyFollowerController.Instance != null)
             {
-                return activeFollowerCombatant;
+                CreatureCombatant activeFollowerCombatant = ActivePartyFollowerController.Instance.CurrentFollowerCombatant;
+                if (IsValidCombatant(activeFollowerCombatant))
+                {
+                    if (!ReferenceEquals(activeFollowerCombatant.Instance, activePartyInstance))
+                    {
+                        CreatureDefinition activeDef = CreatureRegistry.Get(activePartyInstance.definitionID);
+                        if (activeDef != null)
+                        {
+                            activeFollowerCombatant.autoInitWhelpling = false;
+                            activeFollowerCombatant.InitFromDefinition(activeDef, activePartyInstance);
+                        }
+                    }
+                    playerCreature = activeFollowerCombatant;
+                    return playerCreature;
+                }
+            }
+
+            if (IsValidCombatant(playerCreature))
+            {
+                if (!ReferenceEquals(playerCreature.Instance, activePartyInstance))
+                {
+                    CreatureDefinition activeDef = CreatureRegistry.Get(activePartyInstance.definitionID);
+                    if (activeDef != null)
+                    {
+                        playerCreature.autoInitWhelpling = false;
+                        playerCreature.InitFromDefinition(activeDef, activePartyInstance);
+                    }
+                }
+                return playerCreature;
             }
         }
+
+        if (IsValidCombatant(playerCreature)) return playerCreature;
 
         GameObject frog = GameObject.Find("Frog");
         if (frog != null)
