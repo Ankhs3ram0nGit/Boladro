@@ -95,7 +95,13 @@ public class ActivePartyFollowerController : MonoBehaviour
     {
         HandleCycleInput();
         ApplyFollowerMovementSettings();
+        FaceFollowerTowardPlayer();
         BindFollowerToPlayerHealth();
+    }
+
+    void LateUpdate()
+    {
+        FaceFollowerTowardPlayer();
     }
 
     private void HandleCycleInput()
@@ -246,6 +252,19 @@ public class ActivePartyFollowerController : MonoBehaviour
                 bounceAnimator.RefreshDefaultSprite();
             }
         }
+
+        FaceFollowerTowardPlayer();
+    }
+
+    private void FaceFollowerTowardPlayer()
+    {
+        if (followerRenderer == null || followerRoot == null) return;
+
+        float dx = transform.position.x - followerRoot.transform.position.x;
+        if (Mathf.Abs(dx) <= 0.0001f) return;
+
+        bool playerIsLeft = dx < 0f;
+        followerRenderer.flipX = spriteFacesRight ? playerIsLeft : !playerIsLeft;
     }
 
     private static T EnsureComponent<T>(GameObject go) where T : Component

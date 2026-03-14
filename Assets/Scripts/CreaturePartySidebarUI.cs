@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
@@ -7,6 +9,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
 {
     private sealed class PartySlotView : MonoBehaviour
     {
+        public int slotIndex;
         public RectTransform slotRect;
         public LayoutElement layout;
         public Image background;
@@ -20,6 +23,10 @@ public class CreaturePartySidebarUI : MonoBehaviour
         public Text hpText;
         public Image hpFill;
         public Image xpFill;
+        public CreatureInstance instance;
+        public CreatureDefinition definition;
+        public bool isActive;
+        public float expandT;
     }
 
     [Header("Data")]
@@ -28,11 +35,16 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
     [Header("Layout")]
     public Vector2 anchoredPosition = new Vector2(16f, -120f);
-    public Vector2 inactiveSlotSize = new Vector2(230f, 84f);
-    public Vector2 activeSlotSize = new Vector2(230f, 84f);
-    public Vector2 inactiveIconSize = new Vector2(60f, 60f);
-    public Vector2 activeIconSize = new Vector2(60f, 60f);
+    public Vector2 collapsedSlotSize = new Vector2(72f, 72f);
+    public Vector2 expandedSlotSize = new Vector2(230f, 84f);
+    public Vector2 collapsedIconSize = new Vector2(52f, 52f);
+    public Vector2 expandedIconSize = new Vector2(60f, 60f);
     public float spacing = 6f;
+    [Min(1f)] public float expandAnimationSpeed = 10f;
+    [Range(0f, 1f)] public float expandedInfoThreshold = 0.6f;
+
+    [Header("Interaction")]
+    public Key expandAllHoldKey = Key.Q;
 
     [Header("Visuals")]
     public Sprite markerBackgroundSprite;
@@ -65,6 +77,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private readonly List<Sprite> generatedHeadSprites = new List<Sprite>();
     private bool uiDirty = true;
     private int lastRenderedCount = -1;
+    private bool expandAllHeld;
 
     void Awake()
     {
@@ -77,6 +90,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
     void OnEnable()
     {
         uiDirty = true;
+        expandAllHeld = false;
         EnsurePartySource();
         BindPartyEvents();
         if (!Application.isPlaying || builtSlots.Count == 0)
@@ -87,7 +101,12 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
     void LateUpdate()
     {
-        if (!Application.isPlaying) return;
+        UpdateExpandHoldState();
+        if (!Application.isPlaying)
+        {
+            TickCardAnimations();
+            return;
+        }
 
         EnsurePartySource();
         int desiredCount = 0;
@@ -101,6 +120,8 @@ public class CreaturePartySidebarUI : MonoBehaviour
         {
             RebuildUI();
         }
+
+        TickCardAnimations();
     }
 
     void OnDisable()
@@ -178,7 +199,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
             listRoot = go.GetComponent<RectTransform>();
         }
 
-        float maxWidth = Mathf.Max(inactiveSlotSize.x, activeSlotSize.x);
+        float maxWidth = Mathf.Max(collapsedSlotSize.x, expandedSlotSize.x);
         listRoot.anchorMin = new Vector2(0f, 1f);
         listRoot.anchorMax = new Vector2(0f, 1f);
         listRoot.pivot = new Vector2(0f, 1f);
@@ -303,9 +324,11 @@ public class CreaturePartySidebarUI : MonoBehaviour
         slot.transform.SetParent(listRoot, false);
 
         PartySlotView view = slot.GetComponent<PartySlotView>();
+        view.slotIndex = index;
         view.slotRect = slot.GetComponent<RectTransform>();
         view.layout = slot.GetComponent<LayoutElement>();
         view.background = slot.GetComponent<Image>();
+        view.expandT = 0f;
 
         view.background.sprite = markerBackgroundSprite;
         view.background.color = markerColor;
@@ -429,19 +452,11 @@ public class CreaturePartySidebarUI : MonoBehaviour
         PartySlotView view = slotObj.GetComponent<PartySlotView>();
         if (view == null) return;
 
-        // Force all cards to use expanded dimensions (scene-serialized inactive values may still be old).
-        Vector2 slotDims = new Vector2(
-            Mathf.Max(activeSlotSize.x, inactiveSlotSize.x),
-            Mathf.Max(activeSlotSize.y, inactiveSlotSize.y));
-        Vector2 iconDims = new Vector2(
-            Mathf.Max(activeIconSize.x, inactiveIconSize.x),
-            Mathf.Max(activeIconSize.y, inactiveIconSize.y));
-
-        view.slotRect.sizeDelta = slotDims;
-        view.layout.preferredWidth = slotDims.x;
-        view.layout.preferredHeight = slotDims.y;
-        view.layout.minWidth = slotDims.x;
-        view.layout.minHeight = slotDims.y;
+        view.instance = instance;
+        view.definition = def;
+        view.isActive = isActive;
+        bool shouldExpand = isActive || expandAllHeld;
+        view.expandT = Mathf.Clamp01(shouldExpand ? Mathf.Max(view.expandT, 0.9f) : Mathf.Min(view.expandT, 0.1f));
 
         view.background.color = isActive ? activeMarkerColor : markerColor;
         view.background.sprite = markerBackgroundSprite;
@@ -451,23 +466,6 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
         view.icon.sprite = ResolveHeadSprite(def);
         view.icon.enabled = view.icon.sprite != null;
-        view.iconRect.sizeDelta = iconDims;
-
-        view.iconRect.anchorMin = new Vector2(0f, 0.5f);
-        view.iconRect.anchorMax = new Vector2(0f, 0.5f);
-        view.iconRect.pivot = new Vector2(0.5f, 0.5f);
-        view.iconRect.anchoredPosition = new Vector2(10f + iconDims.x * 0.5f, 0f);
-
-        view.infoRoot.gameObject.SetActive(true);
-        view.infoRoot.anchorMin = new Vector2(0f, 0f);
-        view.infoRoot.anchorMax = new Vector2(1f, 1f);
-        view.infoRoot.pivot = new Vector2(0.5f, 0.5f);
-        view.infoRoot.offsetMin = new Vector2(iconDims.x + 18f, 8f);
-        view.infoRoot.offsetMax = new Vector2(-10f, -8f);
-
-        LayoutText(view.nameText.rectTransform, new Vector2(0f, 0.72f), new Vector2(0.75f, 1f));
-        LayoutText(view.levelText.rectTransform, new Vector2(0.75f, 0.72f), new Vector2(1f, 1f));
-        LayoutText(view.hpText.rectTransform, new Vector2(0.55f, 0.28f), new Vector2(1f, 0.42f));
 
         string displayName = instance != null ? instance.DisplayName : (def != null ? def.displayName : "Creature");
         int level = instance != null ? Mathf.Max(1, instance.level) : 1;
@@ -481,18 +479,17 @@ public class CreaturePartySidebarUI : MonoBehaviour
         view.hpFill.fillAmount = Mathf.Clamp01(maxHp > 0 ? (float)curHp / maxHp : 0f);
         view.xpFill.fillAmount = ComputeXpRatio(instance);
 
-        view.glass.enabled = !isActive;
-        view.glassOutline.enabled = !isActive;
-        if (!isActive)
-        {
-            view.glass.sprite = glassOverlaySprite;
-            view.glass.type = glassOverlaySprite != null && glassOverlaySprite.border.sqrMagnitude > 0f
-                ? Image.Type.Sliced
-                : Image.Type.Simple;
-            view.glass.color = glassColor;
-            view.glassOutline.effectColor = glassOutlineColor;
-            view.glassOutline.effectDistance = new Vector2(glassOutlineThickness, glassOutlineThickness);
-        }
+        view.glass.sprite = glassOverlaySprite;
+        view.glass.type = glassOverlaySprite != null && glassOverlaySprite.border.sqrMagnitude > 0f
+            ? Image.Type.Sliced
+            : Image.Type.Simple;
+        view.glass.color = glassColor;
+        view.glassOutline.effectColor = glassOutlineColor;
+        view.glassOutline.effectDistance = new Vector2(glassOutlineThickness, glassOutlineThickness);
+
+        LayoutText(view.nameText.rectTransform, new Vector2(0f, 0.72f), new Vector2(0.75f, 1f));
+        LayoutText(view.levelText.rectTransform, new Vector2(0.75f, 0.72f), new Vector2(1f, 1f));
+        LayoutText(view.hpText.rectTransform, new Vector2(0.55f, 0.28f), new Vector2(1f, 0.42f));
     }
 
     private void LayoutText(RectTransform rt, Vector2 anchorMin, Vector2 anchorMax)
@@ -502,6 +499,73 @@ public class CreaturePartySidebarUI : MonoBehaviour
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
+    }
+
+    private void UpdateExpandHoldState()
+    {
+        bool held = false;
+        Keyboard kb = Keyboard.current;
+        if (kb != null)
+        {
+            KeyControl key = kb[expandAllHoldKey];
+            if (key != null) held = key.isPressed;
+        }
+
+        if (held != expandAllHeld)
+        {
+            expandAllHeld = held;
+            uiDirty = true;
+        }
+    }
+
+    private void TickCardAnimations()
+    {
+        if (builtSlots.Count == 0) return;
+
+        float dt = Application.isPlaying ? Time.unscaledDeltaTime : Time.deltaTime;
+        float step = Mathf.Max(1f, expandAnimationSpeed) * dt;
+
+        for (int i = 0; i < builtSlots.Count; i++)
+        {
+            GameObject slotObj = builtSlots[i];
+            if (slotObj == null || !slotObj.activeSelf) continue;
+
+            PartySlotView view = slotObj.GetComponent<PartySlotView>();
+            if (view == null) continue;
+
+            bool expandedTarget = view.isActive || expandAllHeld;
+            view.expandT = Mathf.MoveTowards(view.expandT, expandedTarget ? 1f : 0f, step);
+
+            Vector2 slotDims = Vector2.Lerp(collapsedSlotSize, expandedSlotSize, view.expandT);
+            Vector2 iconDims = Vector2.Lerp(collapsedIconSize, expandedIconSize, view.expandT);
+
+            view.slotRect.sizeDelta = slotDims;
+            view.layout.preferredWidth = slotDims.x;
+            view.layout.preferredHeight = slotDims.y;
+            view.layout.minWidth = slotDims.x;
+            view.layout.minHeight = slotDims.y;
+
+            view.iconRect.anchorMin = new Vector2(0f, 0.5f);
+            view.iconRect.anchorMax = new Vector2(0f, 0.5f);
+            view.iconRect.pivot = new Vector2(0.5f, 0.5f);
+            view.iconRect.sizeDelta = iconDims;
+
+            float collapsedIconX = slotDims.x * 0.5f;
+            float expandedIconX = 10f + iconDims.x * 0.5f;
+            float iconX = Mathf.Lerp(collapsedIconX, expandedIconX, view.expandT);
+            view.iconRect.anchoredPosition = new Vector2(iconX, 0f);
+
+            view.infoRoot.anchorMin = new Vector2(0f, 0f);
+            view.infoRoot.anchorMax = new Vector2(1f, 1f);
+            view.infoRoot.pivot = new Vector2(0.5f, 0.5f);
+            view.infoRoot.offsetMin = new Vector2(iconDims.x + 18f, 8f);
+            view.infoRoot.offsetMax = new Vector2(-10f, -8f);
+            view.infoRoot.gameObject.SetActive(view.expandT >= expandedInfoThreshold);
+
+            bool glassVisible = !view.isActive && !expandAllHeld;
+            view.glass.enabled = glassVisible;
+            view.glassOutline.enabled = glassVisible;
+        }
     }
 
     private float ComputeXpRatio(CreatureInstance instance)
