@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.UI;
@@ -90,6 +91,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private readonly Dictionary<string, Sprite> headSpriteCache = new Dictionary<string, Sprite>();
     private readonly List<Sprite> generatedHeadSprites = new List<Sprite>();
     private Sprite neutralFillSprite;
+    private InventoryUI inventoryUI;
     private bool uiDirty = true;
     private int lastRenderedCount = -1;
     private bool expandAllHeld;
@@ -183,6 +185,11 @@ public class CreaturePartySidebarUI : MonoBehaviour
             {
                 partySource = mover.gameObject.AddComponent<PlayerCreatureParty>();
             }
+        }
+
+        if (inventoryUI == null)
+        {
+            inventoryUI = GetComponent<InventoryUI>();
         }
     }
 
@@ -359,7 +366,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
 
         view.background.sprite = markerBackgroundSprite;
         view.background.color = markerColor;
-        view.background.raycastTarget = false;
+        view.background.raycastTarget = true;
         view.background.type = markerBackgroundSprite != null && markerBackgroundSprite.border.sqrMagnitude > 0f
             ? Image.Type.Sliced
             : Image.Type.Simple;
@@ -434,6 +441,12 @@ public class CreaturePartySidebarUI : MonoBehaviour
         Image xpBack = CreateBar("XPBarBG", view.infoRoot, xpBarBackColor, new Vector2(0f, 0.14f), new Vector2(1f, 0.28f));
         view.xpBarRect = xpBack.rectTransform;
         view.xpFill = CreateFill(xpBack.transform as RectTransform, xpBarFillColor);
+
+        PartySidebarSlotDragUI dragView = slot.GetComponent<PartySidebarSlotDragUI>();
+        if (dragView == null) dragView = slot.AddComponent<PartySidebarSlotDragUI>();
+        dragView.sidebar = this;
+        dragView.slotIndex = index;
+        dragView.iconSource = view.icon;
 
         return slot;
     }
@@ -570,6 +583,14 @@ public class CreaturePartySidebarUI : MonoBehaviour
             view.faintedOverlay.color = new Color(1f, 1f, 1f, 0.25f);
             view.faintedOverlay.enabled = curHp <= 0;
         }
+
+        PartySidebarSlotDragUI dragView = slotObj.GetComponent<PartySidebarSlotDragUI>();
+        if (dragView != null)
+        {
+            dragView.sidebar = this;
+            dragView.slotIndex = view.slotIndex;
+            dragView.iconSource = view.icon;
+        }
     }
 
     private void RefreshLiveSlotData()
@@ -704,10 +725,12 @@ public class CreaturePartySidebarUI : MonoBehaviour
     private void TickCardAnimations()
     {
         if (builtSlots.Count == 0) return;
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
 
         float dt = Application.isPlaying ? Time.unscaledDeltaTime : Time.deltaTime;
         float baseSpeed = Mathf.Max(0.5f, expandAnimationSpeed);
         float holdSpeed = baseSpeed * Mathf.Clamp(holdExpandSpeedMultiplier, 0.1f, 1f);
+        bool forceExpandFromInventory = inventoryUI != null && inventoryUI.IsPanelOpen;
 
         for (int i = 0; i < builtSlots.Count; i++)
         {
@@ -717,7 +740,7 @@ public class CreaturePartySidebarUI : MonoBehaviour
             PartySlotView view = slotObj.GetComponent<PartySlotView>();
             if (view == null) continue;
 
-            bool expandedTarget = view.isActive || expandAllHeld;
+            bool expandedTarget = forceExpandFromInventory || view.isActive || expandAllHeld;
             float speed = baseSpeed;
             if (expandAllHeld && !view.isActive && expandedTarget)
             {
@@ -798,13 +821,63 @@ public class CreaturePartySidebarUI : MonoBehaviour
             view.infoRoot.pivot = new Vector2(0.5f, 0.5f);
             view.infoRoot.offsetMin = new Vector2(iconDims.x + 18f, 8f);
             view.infoRoot.offsetMax = new Vector2(-10f, -8f);
-            view.infoRoot.gameObject.SetActive(view.expandT >= expandedInfoThreshold);
+            view.infoRoot.gameObject.SetActive(forceExpandFromInventory || view.expandT >= expandedInfoThreshold);
             LayoutInfoBars(view);
 
-            bool glassVisible = !view.isActive && !expandAllHeld;
+            bool glassVisible = !view.isActive && !expandAllHeld && !forceExpandFromInventory;
             view.glass.enabled = glassVisible;
             view.glassOutline.enabled = glassVisible;
         }
+    }
+
+    public void HandleSidebarSlotPointerDown(int slotIndex)
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return;
+        if (!inventoryUI.IsCreaturesTabOpen) return;
+        inventoryUI.OnCreaturePartySlotClicked(slotIndex);
+    }
+
+    public void BeginSidebarPartyDrag(int slotIndex, Sprite dragSprite)
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return;
+        if (!inventoryUI.IsCreaturesTabOpen) return;
+        inventoryUI.BeginCreatureDragFromPartyIndex(slotIndex, dragSprite);
+    }
+
+    public bool HasActiveCreatureDrag()
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        return inventoryUI != null && inventoryUI.HasActiveCreatureDrag();
+    }
+
+    public void UpdateCreatureDragVisual(PointerEventData eventData)
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return;
+        inventoryUI.UpdateDragVisual(eventData);
+    }
+
+    public void DropDraggedCreatureOnSidebarSlot(int slotIndex)
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return;
+        inventoryUI.DropCreatureOnPartySlot(slotIndex);
+    }
+
+    public void DropDraggedCreatureOnStorageSlot(int pageLocalIndex)
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return;
+        inventoryUI.DropCreatureOnStorageSlot(pageLocalIndex);
+    }
+
+    public void EndCreatureDrag()
+    {
+        if (inventoryUI == null) inventoryUI = GetComponent<InventoryUI>();
+        if (inventoryUI == null) return;
+        inventoryUI.EndCreatureDrag();
     }
 
     private void LayoutInfoBars(PartySlotView view)
@@ -919,5 +992,66 @@ public class CreaturePartySidebarUI : MonoBehaviour
                 "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_IconArrow01a.png");
         }
 #endif
+    }
+}
+
+public sealed class PartySidebarSlotDragUI : MonoBehaviour, IPointerDownHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler
+{
+    public CreaturePartySidebarUI sidebar;
+    public int slotIndex;
+    public Image iconSource;
+
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (sidebar == null) return;
+        sidebar.HandleSidebarSlotPointerDown(slotIndex);
+    }
+
+    public void OnBeginDrag(PointerEventData eventData)
+    {
+        if (sidebar == null) return;
+        Sprite dragSprite = iconSource != null ? iconSource.sprite : null;
+        sidebar.BeginSidebarPartyDrag(slotIndex, dragSprite);
+        sidebar.UpdateCreatureDragVisual(eventData);
+    }
+
+    public void OnDrag(PointerEventData eventData)
+    {
+        if (sidebar == null) return;
+        if (!sidebar.HasActiveCreatureDrag()) return;
+        sidebar.UpdateCreatureDragVisual(eventData);
+    }
+
+    public void OnDrop(PointerEventData eventData)
+    {
+        if (sidebar == null) return;
+        if (!sidebar.HasActiveCreatureDrag()) return;
+        sidebar.DropDraggedCreatureOnSidebarSlot(slotIndex);
+    }
+
+    public void OnEndDrag(PointerEventData eventData)
+    {
+        if (sidebar == null) return;
+        if (!sidebar.HasActiveCreatureDrag()) return;
+
+        if (eventData != null && eventData.pointerCurrentRaycast.gameObject != null)
+        {
+            GameObject go = eventData.pointerCurrentRaycast.gameObject;
+            CreatureStorageSlotUI storageTarget = go.GetComponentInParent<CreatureStorageSlotUI>();
+            if (storageTarget != null)
+            {
+                sidebar.DropDraggedCreatureOnStorageSlot(storageTarget.pageLocalIndex);
+                return;
+            }
+
+            PartySidebarSlotDragUI partyTarget = go.GetComponentInParent<PartySidebarSlotDragUI>();
+            if (partyTarget != null)
+            {
+                sidebar.DropDraggedCreatureOnSidebarSlot(partyTarget.slotIndex);
+                return;
+            }
+        }
+
+        sidebar.EndCreatureDrag();
     }
 }

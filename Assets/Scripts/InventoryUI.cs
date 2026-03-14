@@ -72,7 +72,6 @@ public class InventoryUI : MonoBehaviour
     private RectTransform creatureGridRoot;
     private RectTransform creaturePagerRoot;
     private CreatureStorageSlotUI[] creatureSlots;
-    private CreaturePartySlotUI[] creaturePartySlots;
     private Button creaturePrevPageButton;
     private Button creatureNextPageButton;
     private Text creaturePageLabel;
@@ -114,6 +113,16 @@ public class InventoryUI : MonoBehaviour
 
     private PlayerCreatureParty party;
     private PlayerCreatureStorage storage;
+
+    public bool IsPanelOpen
+    {
+        get { return panelRoot != null && panelRoot.gameObject.activeSelf; }
+    }
+
+    public bool IsCreaturesTabOpen
+    {
+        get { return IsPanelOpen && activeTab == InventoryTab.Creatures; }
+    }
 
     void Awake()
     {
@@ -839,20 +848,25 @@ public class InventoryUI : MonoBehaviour
     public void BeginCreatureDragFromParty(CreaturePartySlotUI slot)
     {
         if (slot == null) return;
+        BeginCreatureDragFromPartyIndex(slot.partyIndex, slot.icon != null ? slot.icon.sprite : null);
+    }
+
+    public void BeginCreatureDragFromPartyIndex(int partyIndex, Sprite dragSprite)
+    {
         if (dragMode != DragMode.None && dragMode != DragMode.CreatureStorage && dragMode != DragMode.CreatureParty) return;
         EnsureCreatureSources();
         if (party == null) return;
 
-        CreatureInstance moving = party.GetCreatureAt(slot.partyIndex);
+        CreatureInstance moving = party.GetCreatureAt(partyIndex);
         if (moving == null) return;
 
         dragMode = DragMode.CreatureParty;
-        draggingCreaturePartyIndex = slot.partyIndex;
+        draggingCreaturePartyIndex = partyIndex;
         draggingCreatureStorageIndex = -1;
 
         EnsureDraggingIcon();
         draggingIcon.transform.SetAsLastSibling();
-        draggingIcon.sprite = slot.icon != null ? slot.icon.sprite : null;
+        draggingIcon.sprite = dragSprite;
         draggingIcon.color = Color.white;
         draggingIcon.rectTransform.sizeDelta = new Vector2(Mathf.RoundToInt(slotSize * 0.9f), Mathf.RoundToInt(slotSize * 0.9f));
         draggingIcon.gameObject.SetActive(draggingIcon.sprite != null);
@@ -1378,99 +1392,9 @@ public class InventoryUI : MonoBehaviour
         creaturePageLabel = EnsurePagerLabel(pagerTf, "PageLabel");
         creatureNextPageButton = EnsurePagerButton(pagerTf, "Next", ">", OnNextCreaturePage);
 
-        EnsureCreaturePartySlotsUI();
+        Transform legacyPartyTf = creatureRightPanelRoot.Find("PartySlotsRoot");
+        if (legacyPartyTf != null) legacyPartyTf.gameObject.SetActive(false);
         EnsureCreatureDetailsUI();
-    }
-
-    void EnsureCreaturePartySlotsUI()
-    {
-        if (creatureRightPanelRoot == null) return;
-
-        Transform partyTf = creatureRightPanelRoot.Find("PartySlotsRoot");
-        if (partyTf == null)
-        {
-            GameObject go = new GameObject("PartySlotsRoot", typeof(RectTransform), typeof(CanvasRenderer), typeof(GridLayoutGroup));
-            go.transform.SetParent(creatureRightPanelRoot, false);
-            partyTf = go.transform;
-        }
-
-        RectTransform partyRt = partyTf as RectTransform;
-        GridLayoutGroup partyGrid = partyTf.GetComponent<GridLayoutGroup>();
-        partyGrid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-        partyGrid.constraintCount = 3;
-        partyGrid.childAlignment = TextAnchor.UpperLeft;
-        partyGrid.spacing = new Vector2(6f, 6f);
-        partyGrid.cellSize = new Vector2(86f, 78f);
-
-        if (creaturePartySlots == null || creaturePartySlots.Length != PlayerCreatureParty.MaxPartySize)
-        {
-            creaturePartySlots = new CreaturePartySlotUI[PlayerCreatureParty.MaxPartySize];
-        }
-
-        for (int i = 0; i < PlayerCreatureParty.MaxPartySize; i++)
-        {
-            Transform slotTf = partyTf.Find("PartySlot" + (i + 1));
-            if (slotTf == null)
-            {
-                GameObject slotGo = new GameObject("PartySlot" + (i + 1), typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
-                slotGo.transform.SetParent(partyTf, false);
-                slotTf = slotGo.transform;
-            }
-
-            CreaturePartySlotUI view = slotTf.GetComponent<CreaturePartySlotUI>();
-            if (view == null) view = slotTf.gameObject.AddComponent<CreaturePartySlotUI>();
-            view.ui = this;
-            view.partyIndex = i;
-            view.background = slotTf.GetComponent<Image>();
-            view.background.sprite = slotSprite;
-            view.background.type = slotSprite != null && slotSprite.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
-            view.background.color = normalColor;
-
-            Button button = slotTf.GetComponent<Button>();
-            button.onClick.RemoveAllListeners();
-            int capturedIndex = i;
-            button.onClick.AddListener(() => OnCreaturePartySlotClicked(capturedIndex));
-
-            Transform iconTf = slotTf.Find("Icon");
-            if (iconTf == null)
-            {
-                GameObject go = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-                go.transform.SetParent(slotTf, false);
-                iconTf = go.transform;
-            }
-            view.icon = iconTf.GetComponent<Image>();
-            view.icon.preserveAspect = true;
-            view.icon.color = Color.white;
-            RectTransform iconRt = view.icon.rectTransform;
-            iconRt.anchorMin = new Vector2(0.5f, 0.58f);
-            iconRt.anchorMax = new Vector2(0.5f, 0.58f);
-            iconRt.pivot = new Vector2(0.5f, 0.5f);
-            iconRt.sizeDelta = new Vector2(54f, 54f);
-
-            Transform levelTf = slotTf.Find("Level");
-            if (levelTf == null)
-            {
-                GameObject go = new GameObject("Level", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(Outline));
-                go.transform.SetParent(slotTf, false);
-                levelTf = go.transform;
-            }
-            view.levelText = levelTf.GetComponent<Text>();
-            view.levelText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            view.levelText.fontSize = 11;
-            view.levelText.alignment = TextAnchor.UpperRight;
-            view.levelText.color = Color.white;
-            RectTransform lvlRt = view.levelText.rectTransform;
-            lvlRt.anchorMin = new Vector2(0f, 0.76f);
-            lvlRt.anchorMax = new Vector2(1f, 1f);
-            lvlRt.offsetMin = new Vector2(2f, 0f);
-            lvlRt.offsetMax = new Vector2(-2f, -2f);
-
-            creaturePartySlots[i] = view;
-        }
-
-        partyRt.anchorMin = new Vector2(0f, 1f);
-        partyRt.anchorMax = new Vector2(0f, 1f);
-        partyRt.pivot = new Vector2(0f, 1f);
     }
 
     void EnsureCreatureDetailsUI()
@@ -1620,8 +1544,11 @@ public class InventoryUI : MonoBehaviour
         bg.color = new Color(0.20f, 0.20f, 0.24f, 0.95f);
 
         LayoutElement le = tf.GetComponent<LayoutElement>();
-        le.preferredWidth = name == "SoulTraitsTab" ? 110f : 84f;
-        le.preferredHeight = 30f;
+        le.preferredWidth = name == "SoulTraitsTab" ? 102f : 84f;
+        le.preferredHeight = 24f;
+
+        RectTransform rt = tf as RectTransform;
+        if (rt != null) rt.sizeDelta = new Vector2(le.preferredWidth, le.preferredHeight);
 
         Button b = tf.GetComponent<Button>();
         b.onClick.RemoveAllListeners();
@@ -1953,23 +1880,13 @@ public class InventoryUI : MonoBehaviour
             creatureRightPanelRoot.sizeDelta = new Vector2(rightW, rightH);
         }
 
-        if (creaturePartySlots != null && creaturePartySlots.Length > 0)
-        {
-            RectTransform partyRoot = creaturePartySlots[0] != null ? creaturePartySlots[0].transform.parent as RectTransform : null;
-            if (partyRoot != null)
-            {
-                partyRoot.anchoredPosition = new Vector2(10f, -10f);
-                partyRoot.sizeDelta = new Vector2(270f, 168f);
-            }
-        }
-
         if (creatureDetailsRoot != null && creatureRightPanelRoot != null)
         {
             creatureDetailsRoot.anchorMin = new Vector2(0f, 1f);
             creatureDetailsRoot.anchorMax = new Vector2(1f, 1f);
             creatureDetailsRoot.pivot = new Vector2(0f, 1f);
-            creatureDetailsRoot.anchoredPosition = new Vector2(10f, -188f);
-            creatureDetailsRoot.sizeDelta = new Vector2(-20f, -(creatureRightPanelRoot.sizeDelta.y - 198f));
+            creatureDetailsRoot.anchoredPosition = new Vector2(10f, -10f);
+            creatureDetailsRoot.sizeDelta = new Vector2(-20f, -20f);
 
             if (creatureDetailSprite != null)
             {
@@ -2058,16 +1975,16 @@ public class InventoryUI : MonoBehaviour
                 creatureSubTabsRoot.anchorMin = new Vector2(0f, 1f);
                 creatureSubTabsRoot.anchorMax = new Vector2(1f, 1f);
                 creatureSubTabsRoot.pivot = new Vector2(0f, 1f);
-                creatureSubTabsRoot.anchoredPosition = new Vector2(0f, -130f);
-                creatureSubTabsRoot.sizeDelta = new Vector2(0f, 32f);
+                creatureSubTabsRoot.anchoredPosition = new Vector2(0f, -126f);
+                creatureSubTabsRoot.sizeDelta = new Vector2(0f, 26f);
             }
             if (creatureDetailBodyText != null)
             {
                 RectTransform rt = creatureDetailBodyText.rectTransform;
-                rt.anchorMin = new Vector2(0f, 1f);
-                rt.anchorMax = new Vector2(1f, 0f);
+                rt.anchorMin = new Vector2(0f, 0f);
+                rt.anchorMax = new Vector2(1f, 1f);
                 rt.offsetMin = new Vector2(2f, 2f);
-                rt.offsetMax = new Vector2(-2f, -166f);
+                rt.offsetMax = new Vector2(-2f, -158f);
             }
         }
 
@@ -2156,7 +2073,6 @@ public class InventoryUI : MonoBehaviour
         if (creaturePrevPageButton != null) creaturePrevPageButton.interactable = creaturePageIndex > 0;
         if (creatureNextPageButton != null) creatureNextPageButton.interactable = creaturePageIndex < pageCount - 1;
 
-        RefreshCreaturePartySlots();
         RefreshCreatureDetailPanel();
     }
 
@@ -2234,39 +2150,6 @@ public class InventoryUI : MonoBehaviour
         if (slot.levelLabel != null)
         {
             slot.levelLabel.text = "Lv " + Mathf.Max(1, instance.level);
-        }
-    }
-
-    void RefreshCreaturePartySlots()
-    {
-        if (creaturePartySlots == null || party == null) return;
-        for (int i = 0; i < creaturePartySlots.Length; i++)
-        {
-            CreaturePartySlotUI slot = creaturePartySlots[i];
-            if (slot == null) continue;
-            CreatureInstance instance = party.GetCreatureAt(i);
-            bool selected = selectedCreatureFromParty && selectedCreaturePartyIndex == i;
-
-            if (slot.background != null)
-            {
-                Sprite bg = selected ? selectedSprite : slotSprite;
-                slot.background.sprite = bg;
-                slot.background.type = bg != null && bg.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
-                slot.background.color = selected ? selectedColor : normalColor;
-            }
-
-            if (slot.icon != null)
-            {
-                CreatureDefinition def = instance != null ? CreatureRegistry.Get(instance.definitionID) : null;
-                slot.icon.sprite = def != null ? def.sprite : null;
-                slot.icon.enabled = slot.icon.sprite != null;
-                slot.icon.color = Color.white;
-            }
-
-            if (slot.levelText != null)
-            {
-                slot.levelText.text = instance != null ? ("Lv " + Mathf.Max(1, instance.level)) : string.Empty;
-            }
         }
     }
 
@@ -2660,10 +2543,10 @@ public class CreatureStorageSlotUI : MonoBehaviour, IPointerDownHandler, IBeginD
                 return;
             }
 
-            CreaturePartySlotUI partyTarget = go.GetComponentInParent<CreaturePartySlotUI>();
+            PartySidebarSlotDragUI partyTarget = go.GetComponentInParent<PartySidebarSlotDragUI>();
             if (partyTarget != null)
             {
-                ui.DropCreatureOnPartySlot(partyTarget.partyIndex);
+                ui.DropCreatureOnPartySlot(partyTarget.slotIndex);
                 return;
             }
         }
