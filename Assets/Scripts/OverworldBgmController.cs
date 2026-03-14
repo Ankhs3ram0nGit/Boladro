@@ -6,10 +6,10 @@ using UnityEditor;
 [DefaultExecutionOrder(-450)]
 public class OverworldBgmController : MonoBehaviour
 {
-    private const string OverworldBgmPath = "Assets/UI Soundpack/16-Bit Fantasy & Adventure Music [no AI].wav";
+    private const string OverworldBgmPath = "Assets/UI Soundpack/16-Bit Fantasy _ Adventure Music [no AI] (online-video-cutter.com)_2.wav";
 
     [Range(0f, 1f)] public float bgmVolume = 0.2f;
-    [Min(0.01f)] public float fadeInDuration = 1.1f;
+    [Min(0.01f)] public float fadeInDuration = 11f;
     [Min(0.01f)] public float fadeOutDuration = 0.8f;
     [Min(0.05f)] public float statePollInterval = 0.08f;
     public AudioClip overworldBgm;
@@ -61,7 +61,7 @@ public class OverworldBgmController : MonoBehaviour
         {
             initialized = true;
             wasInBattle = BattleSystem.IsEngagedBattleActive;
-            ApplyBattleState(wasInBattle, true);
+            ApplyBattleState(wasInBattle, false);
         }
 
         if (Time.unscaledTime >= nextStatePollTime)
@@ -142,4 +142,3 @@ public class OverworldBgmController : MonoBehaviour
         currentFadeDuration = immediate ? 0.01f : Mathf.Max(0.01f, fadeInDuration);
     }
 }
-

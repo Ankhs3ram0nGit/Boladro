@@ -45,7 +45,7 @@ This file tracks SFX currently wired in code, plus reserved assignments.
 - Player respawn:
   - `Assets/JDSherbert - Ultimate UI SFX Pack (FREE)/New Folder/DSGNSynth_BUFF-Generic Buff_HY_PC-003.wav`
 - Overworld background music (fade-in on overworld start, fade-out on battle start):
-  - `Assets/UI Soundpack/16-Bit Fantasy & Adventure Music [no AI].wav`
+  - `Assets/UI Soundpack/16-Bit Fantasy _ Adventure Music [no AI] (online-video-cutter.com)_2.wav`
 
 ## Reserved / Planned
 
