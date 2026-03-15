@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
@@ -9,11 +10,12 @@ using UnityEngine.UI;
 using UnityEditor;
 #endif
 
-[DefaultExecutionOrder(-700)]
+[DefaultExecutionOrder(-900)]
 public class MainMenuBootstrap : MonoBehaviour
 {
-    private const string PrimaryMenuArtPath = "Assets/UI Soundpack/menu.png";
-    private const string FallbackMenuArtPath = "Assets/ChatGPT Image Mar 12, 2026, 08_41_45 PM.png";
+    private const string RuntimeMenuSceneName = "__RuntimeMainMenuScene";
+    private const string PrimaryMenuTexturePath = "Assets/UI Soundpack/menu.png";
+    private const string FallbackMenuTexturePath = "Assets/ChatGPT Image Mar 12, 2026, 08_41_45 PM.png";
     private const string MenuButtonNormalPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_1.png";
     private const string MenuButtonHighlightPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_2.png";
     private const string MenuButtonPressedPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_3.png";
@@ -22,34 +24,32 @@ public class MainMenuBootstrap : MonoBehaviour
     private static MainMenuBootstrap instance;
     private static bool sessionStarted;
 
-    private readonly List<BehaviourState> suspendedBehaviours = new List<BehaviourState>(64);
-    private readonly List<GameObjectState> hiddenObjects = new List<GameObjectState>(16);
-    private readonly List<GameObjectState> suspendedRootObjects = new List<GameObjectState>(64);
-    private readonly List<GameObject> runtimeCreatedObjects = new List<GameObject>(24);
-    private readonly List<Button> menuButtons = new List<Button>(16);
-    private readonly List<Text> saveEntryLabels = new List<Text>(16);
+    private string gameplayScenePath;
+    private string gameplaySceneName;
+    private int gameplaySceneBuildIndex = -1;
 
+    private Scene runtimeMenuScene;
+    private Camera menuCamera;
     private Canvas menuCanvas;
     private RectTransform playSubmenuRoot;
     private RectTransform saveListRoot;
     private Text noticeText;
+    private readonly List<Text> saveEntryLabels = new List<Text>(32);
+    private readonly List<GameObject> runtimeObjects = new List<GameObject>(32);
+    private readonly List<EventSystemState> suspendedEventSystems = new List<EventSystemState>(4);
+
     private Sprite menuButtonNormal;
     private Sprite menuButtonHighlight;
     private Sprite menuButtonPressed;
-    private bool suspendedGameplay;
-    private float previousTimeScale = 1f;
-    private float previousFixedDeltaTime = 0.02f;
+    private Texture2D menuBackgroundTexture;
 
-    private struct BehaviourState
+    [Header("Background Framing")]
+    [Range(1f, 1.3f)] public float backgroundZoom = 1.02f;
+
+    private struct EventSystemState
     {
-        public Behaviour behaviour;
+        public EventSystem eventSystem;
         public bool wasEnabled;
-    }
-
-    private struct GameObjectState
-    {
-        public GameObject target;
-        public bool wasActive;
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -91,177 +91,98 @@ public class MainMenuBootstrap : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
-        SuspendGameplay();
+
+        CaptureGameplaySceneReference();
+        EnsureRuntimeMenuScene();
         BuildMenuUi();
+        StartCoroutine(EnterMenuStateRoutine());
     }
 
-    private void OnDestroy()
+    private IEnumerator EnterMenuStateRoutine()
     {
-        if (!sessionStarted)
+        SetGameplaySystemsEnabled(false);
+        yield return null;
+
+        Scene gameplayScene = ResolveCapturedGameplayScene();
+        if (gameplayScene.IsValid() && gameplayScene.isLoaded)
         {
-            ResumeGameplay();
+            AsyncOperation unload = SceneManager.UnloadSceneAsync(gameplayScene);
+            if (unload != null) yield return unload;
         }
+
+        SetGameplaySystemsEnabled(false);
     }
 
-    private void SuspendGameplay()
-    {
-        if (suspendedGameplay) return;
-        suspendedGameplay = true;
-
-        previousTimeScale = Time.timeScale;
-        previousFixedDeltaTime = Time.fixedDeltaTime;
-        Time.timeScale = 0f;
-        Time.fixedDeltaTime = previousFixedDeltaTime;
-
-        SuspendActiveSceneRoots();
-
-        SuspendAllOfType<PlayerMover>();
-        SuspendAllOfType<PlayerToolController>();
-        SuspendAllOfType<TreeHoverSelector>();
-        SuspendAllOfType<BattleSystem>();
-        SuspendAllOfType<EncounterTrigger>();
-        SuspendAllOfType<SpawnToBattleBridge>();
-        SuspendAllOfType<InventoryUI>();
-        SuspendAllOfType<InventoryHotbar>();
-        SuspendAllOfType<MiniMapController>();
-        SuspendAllOfType<SpawnManager>();
-
-        HideNamedObject("HUD");
-        HideNamedObject("GameOverUI");
-        HideAllOfType<CreaturePartySidebarUI>();
-    }
-
-    private void ResumeGameplay()
-    {
-        if (!suspendedGameplay) return;
-        suspendedGameplay = false;
-
-        for (int i = 0; i < suspendedRootObjects.Count; i++)
-        {
-            GameObjectState state = suspendedRootObjects[i];
-            if (state.target != null)
-            {
-                state.target.SetActive(state.wasActive);
-            }
-        }
-        suspendedRootObjects.Clear();
-
-        for (int i = 0; i < suspendedBehaviours.Count; i++)
-        {
-            BehaviourState state = suspendedBehaviours[i];
-            if (state.behaviour != null)
-            {
-                state.behaviour.enabled = state.wasEnabled;
-            }
-        }
-        suspendedBehaviours.Clear();
-
-        for (int i = 0; i < hiddenObjects.Count; i++)
-        {
-            GameObjectState state = hiddenObjects[i];
-            if (state.target != null)
-            {
-                state.target.SetActive(state.wasActive);
-            }
-        }
-        hiddenObjects.Clear();
-
-        Time.timeScale = previousTimeScale;
-        Time.fixedDeltaTime = previousFixedDeltaTime;
-    }
-
-    private void SuspendActiveSceneRoots()
+    private void CaptureGameplaySceneReference()
     {
         Scene active = SceneManager.GetActiveScene();
-        if (!active.IsValid() || !active.isLoaded) return;
-
-        GameObject[] roots = active.GetRootGameObjects();
-        for (int i = 0; i < roots.Length; i++)
+        if (!active.IsValid())
         {
-            GameObject root = roots[i];
-            if (root == null) continue;
-            if (HasActiveCameraInHierarchy(root)) continue;
-            suspendedRootObjects.Add(new GameObjectState
-            {
-                target = root,
-                wasActive = root.activeSelf
-            });
-            if (root.activeSelf)
-            {
-                root.SetActive(false);
-            }
+            gameplayScenePath = string.Empty;
+            gameplaySceneName = "SampleScene";
+            gameplaySceneBuildIndex = -1;
+            return;
+        }
+
+        gameplayScenePath = active.path;
+        gameplaySceneName = active.name;
+        gameplaySceneBuildIndex = active.buildIndex;
+
+        if (string.Equals(gameplaySceneName, RuntimeMenuSceneName, StringComparison.Ordinal))
+        {
+            gameplaySceneName = "SampleScene";
+            gameplayScenePath = string.Empty;
+            gameplaySceneBuildIndex = -1;
         }
     }
 
-    private static bool HasActiveCameraInHierarchy(GameObject root)
+    private Scene ResolveCapturedGameplayScene()
     {
-        if (root == null) return false;
-        Camera[] cams = root.GetComponentsInChildren<Camera>(true);
-        if (cams == null || cams.Length == 0) return false;
-        for (int i = 0; i < cams.Length; i++)
+        if (gameplaySceneBuildIndex >= 0)
         {
-            Camera c = cams[i];
-            if (c == null) continue;
-            if (!c.enabled) continue;
-            if (!c.gameObject.activeInHierarchy) continue;
-            return true;
+            Scene byIndex = SceneManager.GetSceneByBuildIndex(gameplaySceneBuildIndex);
+            if (byIndex.IsValid()) return byIndex;
         }
-        return false;
+        if (!string.IsNullOrEmpty(gameplayScenePath))
+        {
+            Scene byPath = SceneManager.GetSceneByPath(gameplayScenePath);
+            if (byPath.IsValid()) return byPath;
+        }
+        if (!string.IsNullOrEmpty(gameplaySceneName))
+        {
+            Scene byName = SceneManager.GetSceneByName(gameplaySceneName);
+            if (byName.IsValid()) return byName;
+        }
+        return default;
     }
 
-    private void SuspendAllOfType<T>() where T : Behaviour
+    private void EnsureRuntimeMenuScene()
     {
-        T[] all = FindObjectsByType<T>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        for (int i = 0; i < all.Length; i++)
+        runtimeMenuScene = SceneManager.GetSceneByName(RuntimeMenuSceneName);
+        if (!runtimeMenuScene.IsValid())
         {
-            T behaviour = all[i];
-            if (behaviour == null) continue;
-            suspendedBehaviours.Add(new BehaviourState
-            {
-                behaviour = behaviour,
-                wasEnabled = behaviour.enabled
-            });
-            behaviour.enabled = false;
+            runtimeMenuScene = SceneManager.CreateScene(RuntimeMenuSceneName);
         }
-    }
 
-    private void HideAllOfType<T>() where T : Component
-    {
-        T[] all = FindObjectsByType<T>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        for (int i = 0; i < all.Length; i++)
-        {
-            T component = all[i];
-            if (component == null || component.gameObject == null) continue;
-            hiddenObjects.Add(new GameObjectState
-            {
-                target = component.gameObject,
-                wasActive = component.gameObject.activeSelf
-            });
-            component.gameObject.SetActive(false);
-        }
-    }
-
-    private void HideNamedObject(string objectName)
-    {
-        GameObject target = GameObject.Find(objectName);
-        if (target == null) return;
-        hiddenObjects.Add(new GameObjectState
-        {
-            target = target,
-            wasActive = target.activeSelf
-        });
-        target.SetActive(false);
+        SceneManager.MoveGameObjectToScene(gameObject, runtimeMenuScene);
+        SceneManager.SetActiveScene(runtimeMenuScene);
     }
 
     private void BuildMenuUi()
     {
-        EnsureButtonSpritesLoaded();
+        EnsureMenuAssetsLoaded();
+        EnsureMenuCamera();
+        EnsureEventSystem();
 
-        GameObject canvasGo = new GameObject("MainMenuCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-        runtimeCreatedObjects.Add(canvasGo);
+        GameObject canvasGo = CreateUiObject("MainMenuCanvas", transform, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        runtimeObjects.Add(canvasGo);
+        SceneManager.MoveGameObjectToScene(canvasGo, runtimeMenuScene);
+
         menuCanvas = canvasGo.GetComponent<Canvas>();
-        menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        menuCanvas.sortingOrder = short.MaxValue - 32;
+        menuCanvas.renderMode = RenderMode.ScreenSpaceCamera;
+        menuCanvas.worldCamera = menuCamera;
+        menuCanvas.planeDistance = 1f;
+        menuCanvas.sortingOrder = 500;
 
         CanvasScaler scaler = canvasGo.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -270,147 +191,250 @@ public class MainMenuBootstrap : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
 
         RectTransform canvasRect = canvasGo.GetComponent<RectTransform>();
-        canvasRect.anchorMin = Vector2.zero;
-        canvasRect.anchorMax = Vector2.one;
-        canvasRect.offsetMin = Vector2.zero;
-        canvasRect.offsetMax = Vector2.zero;
+        StretchRect(canvasRect);
 
-        EnsureEventSystemExists();
+        GameObject bgHolderGo = CreateUiObject("BackgroundHolder", canvasRect);
+        RectTransform bgHolder = bgHolderGo.GetComponent<RectTransform>();
+        StretchRect(bgHolder);
 
-        GameObject bgGo = CreateUiObject("Background", canvasRect);
-        Image bg = bgGo.AddComponent<Image>();
+        GameObject bgGo = CreateUiObject("Background", bgHolder);
+        RawImage bg = bgGo.AddComponent<RawImage>();
         RectTransform bgRect = bgGo.GetComponent<RectTransform>();
-        StretchRect(bgRect);
-        Sprite menuArt = TryLoadMainMenuArt();
-        if (menuArt != null)
+        bgRect.anchorMin = new Vector2(0.5f, 0.5f);
+        bgRect.anchorMax = new Vector2(0.5f, 0.5f);
+        bgRect.pivot = new Vector2(0.5f, 0.5f);
+        bgRect.anchoredPosition = Vector2.zero;
+        bgRect.sizeDelta = new Vector2(1920f, 1080f);
+        bgRect.localScale = Vector3.one * Mathf.Max(1f, backgroundZoom);
+        bg.texture = menuBackgroundTexture;
+        bg.color = Color.white;
+
+        AspectRatioFitter bgFitter = bgGo.AddComponent<AspectRatioFitter>();
+        bgFitter.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+        if (menuBackgroundTexture != null && menuBackgroundTexture.height > 0)
         {
-            bg.sprite = menuArt;
-            bg.color = Color.white;
-            bg.type = Image.Type.Simple;
-            bg.preserveAspect = false;
+            bgFitter.aspectRatio = (float)menuBackgroundTexture.width / menuBackgroundTexture.height;
         }
         else
         {
-            bg.color = new Color(0.11f, 0.19f, 0.27f, 1f);
+            bgFitter.aspectRatio = 16f / 9f;
         }
 
-        GameObject dimGo = CreateUiObject("DimOverlay", canvasRect);
+        GameObject dimGo = CreateUiObject("Dim", canvasRect);
         Image dim = dimGo.AddComponent<Image>();
-        StretchRect(dim.rectTransform);
-        dim.color = new Color(0f, 0f, 0f, 0.26f);
+        RectTransform dimRect = dim.rectTransform;
+        StretchRect(dimRect);
+        dim.color = new Color(0f, 0f, 0f, 0.30f);
+
+        GameObject leftPanelGo = CreateUiObject("MenuPanel", canvasRect);
+        Image leftPanel = leftPanelGo.AddComponent<Image>();
+        leftPanel.color = new Color(0f, 0f, 0f, 0.52f);
+        RectTransform panelRect = leftPanel.rectTransform;
+        panelRect.anchorMin = new Vector2(0.03f, 0.10f);
+        panelRect.anchorMax = new Vector2(0.35f, 0.90f);
+        panelRect.offsetMin = Vector2.zero;
+        panelRect.offsetMax = Vector2.zero;
 
         GameObject titleGo = CreateUiObject("Title", canvasRect);
         Text title = titleGo.AddComponent<Text>();
         title.text = "RIFTBORN";
         title.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        title.alignment = TextAnchor.MiddleCenter;
+        title.fontSize = 116;
         title.fontStyle = FontStyle.Bold;
-        title.fontSize = 128;
-        title.color = new Color(1f, 0.92f, 0.42f, 1f);
-        AddOutline(titleGo, new Color(0f, 0f, 0f, 0.85f), new Vector2(3f, -3f));
+        title.alignment = TextAnchor.MiddleCenter;
+        title.color = new Color(1f, 0.88f, 0.35f, 1f);
+        AddOutline(titleGo, new Color(0f, 0f, 0f, 0.95f), new Vector2(4f, -4f));
         RectTransform titleRect = titleGo.GetComponent<RectTransform>();
         titleRect.anchorMin = new Vector2(0.5f, 1f);
         titleRect.anchorMax = new Vector2(0.5f, 1f);
         titleRect.pivot = new Vector2(0.5f, 1f);
-        titleRect.sizeDelta = new Vector2(1200f, 180f);
-        titleRect.anchoredPosition = new Vector2(0f, -40f);
+        titleRect.sizeDelta = new Vector2(1280f, 190f);
+        titleRect.anchoredPosition = new Vector2(0f, -20f);
 
-        GameObject menuContainerGo = CreateUiObject("MenuContainer", canvasRect);
-        RectTransform menuContainer = menuContainerGo.GetComponent<RectTransform>();
-        menuContainer.anchorMin = new Vector2(0.20f, 0.5f);
-        menuContainer.anchorMax = new Vector2(0.20f, 0.5f);
-        menuContainer.pivot = new Vector2(0f, 0.5f);
-        menuContainer.sizeDelta = new Vector2(520f, 560f);
-        menuContainer.anchoredPosition = new Vector2(0f, -30f);
+        RectTransform menuRoot = CreateUiObject("MenuButtons", leftPanel.rectTransform).GetComponent<RectTransform>();
+        menuRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        menuRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        menuRoot.pivot = new Vector2(0.5f, 0.5f);
+        menuRoot.sizeDelta = new Vector2(480f, 560f);
+        menuRoot.anchoredPosition = new Vector2(0f, 0f);
 
-        VerticalLayoutGroup vlg = menuContainerGo.AddComponent<VerticalLayoutGroup>();
-        vlg.childAlignment = TextAnchor.UpperLeft;
-        vlg.spacing = 14f;
-        vlg.childControlWidth = true;
-        vlg.childControlHeight = false;
-        vlg.childForceExpandHeight = false;
-        vlg.childForceExpandWidth = false;
-
-        ContentSizeFitter fitter = menuContainerGo.AddComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        Button playButton = CreateMenuButton(menuContainer, "Play", 420f, 72f);
+        Button playButton = CreateMenuButton(menuRoot, "Play", new Vector2(0f, 190f), new Vector2(430f, 76f), 42);
         playButton.onClick.AddListener(TogglePlaySubmenu);
 
-        GameObject playSubGo = CreateUiObject("PlaySubmenu", menuContainer);
-        playSubmenuRoot = playSubGo.GetComponent<RectTransform>();
-        VerticalLayoutGroup subLayout = playSubGo.AddComponent<VerticalLayoutGroup>();
-        subLayout.childAlignment = TextAnchor.UpperLeft;
-        subLayout.spacing = 8f;
-        subLayout.childControlWidth = true;
-        subLayout.childControlHeight = false;
-        subLayout.childForceExpandHeight = false;
-        subLayout.childForceExpandWidth = false;
-        ContentSizeFitter subFitter = playSubGo.AddComponent<ContentSizeFitter>();
-        subFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        subFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        playSubmenuRoot = CreateUiObject("PlaySubmenu", menuRoot).GetComponent<RectTransform>();
+        playSubmenuRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        playSubmenuRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        playSubmenuRoot.pivot = new Vector2(0.5f, 0.5f);
+        playSubmenuRoot.sizeDelta = new Vector2(430f, 180f);
+        playSubmenuRoot.anchoredPosition = new Vector2(0f, 70f);
         playSubmenuRoot.gameObject.SetActive(false);
 
-        Button newGameButton = CreateMenuButton(playSubmenuRoot, "New Game", 380f, 64f);
+        Button newGameButton = CreateMenuButton(playSubmenuRoot, "New Game", new Vector2(0f, 50f), new Vector2(390f, 64f), 34);
         newGameButton.onClick.AddListener(StartNewGame);
 
-        GameObject savesTitleGo = CreateUiObject("SavedGamesLabel", playSubmenuRoot);
-        Text savesTitle = savesTitleGo.AddComponent<Text>();
-        savesTitle.text = "Saved Games";
-        savesTitle.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        savesTitle.fontSize = 28;
-        savesTitle.fontStyle = FontStyle.Bold;
-        savesTitle.alignment = TextAnchor.MiddleLeft;
-        savesTitle.color = new Color(1f, 1f, 1f, 0.95f);
-        RectTransform savesTitleRect = savesTitleGo.GetComponent<RectTransform>();
-        savesTitleRect.sizeDelta = new Vector2(420f, 36f);
+        Text saveHeader = CreateLabel(playSubmenuRoot, "Saved Games", new Vector2(0f, 8f), new Vector2(390f, 34f), 26, TextAnchor.MiddleLeft);
+        saveHeader.fontStyle = FontStyle.Bold;
 
-        GameObject saveListGo = CreateUiObject("SavedGamesList", playSubmenuRoot);
-        saveListRoot = saveListGo.GetComponent<RectTransform>();
-        VerticalLayoutGroup saveLayout = saveListGo.AddComponent<VerticalLayoutGroup>();
-        saveLayout.spacing = 6f;
-        saveLayout.childAlignment = TextAnchor.UpperLeft;
-        saveLayout.childControlWidth = true;
-        saveLayout.childControlHeight = false;
-        saveLayout.childForceExpandHeight = false;
-        saveLayout.childForceExpandWidth = false;
-        ContentSizeFitter saveFitter = saveListGo.AddComponent<ContentSizeFitter>();
-        saveFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        saveFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-        saveListRoot.sizeDelta = new Vector2(420f, 200f);
+        saveListRoot = CreateUiObject("SaveList", playSubmenuRoot).GetComponent<RectTransform>();
+        saveListRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        saveListRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        saveListRoot.pivot = new Vector2(0.5f, 1f);
+        saveListRoot.sizeDelta = new Vector2(390f, 94f);
+        saveListRoot.anchoredPosition = new Vector2(0f, -14f);
 
-        Button settingsButton = CreateMenuButton(menuContainer, "Settings", 420f, 72f);
+        Button settingsButton = CreateMenuButton(menuRoot, "Settings", new Vector2(0f, 40f), new Vector2(430f, 76f), 42);
         settingsButton.onClick.AddListener(() => ShowNotice("Settings coming soon."));
 
-        Button creditsButton = CreateMenuButton(menuContainer, "Credits", 420f, 72f);
+        Button creditsButton = CreateMenuButton(menuRoot, "Credits", new Vector2(0f, -60f), new Vector2(430f, 76f), 42);
         creditsButton.onClick.AddListener(() => ShowNotice("Credits coming soon."));
 
-        Button exitButton = CreateMenuButton(menuContainer, "Exit", 420f, 72f);
+        Button exitButton = CreateMenuButton(menuRoot, "Exit", new Vector2(0f, -160f), new Vector2(430f, 76f), 42);
         exitButton.onClick.AddListener(ExitGame);
 
-        GameObject noticeGo = CreateUiObject("MenuNotice", canvasRect);
-        noticeText = noticeGo.AddComponent<Text>();
-        noticeText.text = string.Empty;
-        noticeText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        noticeText.alignment = TextAnchor.MiddleCenter;
-        noticeText.fontSize = 30;
-        noticeText.color = new Color(1f, 1f, 1f, 0.90f);
-        AddOutline(noticeGo, new Color(0f, 0f, 0f, 0.8f), new Vector2(2f, -2f));
-        RectTransform noticeRect = noticeGo.GetComponent<RectTransform>();
-        noticeRect.anchorMin = new Vector2(0.5f, 0f);
-        noticeRect.anchorMax = new Vector2(0.5f, 0f);
-        noticeRect.pivot = new Vector2(0.5f, 0f);
-        noticeRect.sizeDelta = new Vector2(1400f, 64f);
-        noticeRect.anchoredPosition = new Vector2(0f, 42f);
+        noticeText = CreateLabel(canvasRect, string.Empty, new Vector2(0f, 26f), new Vector2(1500f, 56f), 28, TextAnchor.MiddleCenter);
+        noticeText.color = new Color(1f, 1f, 1f, 0.95f);
+        AddOutline(noticeText.gameObject, new Color(0f, 0f, 0f, 0.85f), new Vector2(2f, -2f));
+    }
+
+    private void EnsureMenuAssetsLoaded()
+    {
+#if UNITY_EDITOR
+        EnsureTextureQualityForMenu(PrimaryMenuTexturePath);
+#endif
+        menuBackgroundTexture = TryLoadTexture(PrimaryMenuTexturePath);
+        if (menuBackgroundTexture == null)
+        {
+            menuBackgroundTexture = TryLoadTexture(FallbackMenuTexturePath);
+        }
+
+#if UNITY_EDITOR
+        if (menuButtonNormal == null)
+        {
+            menuButtonNormal = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonNormalPath);
+        }
+        if (menuButtonHighlight == null)
+        {
+            menuButtonHighlight = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonHighlightPath);
+        }
+        if (menuButtonPressed == null)
+        {
+            menuButtonPressed = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonPressedPath);
+        }
+#endif
+    }
+
+    private void EnsureMenuCamera()
+    {
+        GameObject camGo = new GameObject("MainMenuCamera");
+        runtimeObjects.Add(camGo);
+        SceneManager.MoveGameObjectToScene(camGo, runtimeMenuScene);
+
+        menuCamera = camGo.AddComponent<Camera>();
+        menuCamera.clearFlags = CameraClearFlags.SolidColor;
+        menuCamera.backgroundColor = new Color(0f, 0f, 0f, 1f);
+        menuCamera.orthographic = true;
+        menuCamera.orthographicSize = 5f;
+        menuCamera.nearClipPlane = -20f;
+        menuCamera.farClipPlane = 20f;
+        menuCamera.cullingMask = ~0;
+        menuCamera.depth = -100f;
+
+        AudioListener listener = camGo.AddComponent<AudioListener>();
+        listener.enabled = true;
+    }
+
+    private void EnsureEventSystem()
+    {
+        EventSystem[] all = FindObjectsByType<EventSystem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < all.Length; i++)
+        {
+            EventSystem es = all[i];
+            if (es == null) continue;
+            suspendedEventSystems.Add(new EventSystemState
+            {
+                eventSystem = es,
+                wasEnabled = es.enabled
+            });
+            es.enabled = false;
+        }
+
+        GameObject esGo = new GameObject("MainMenuEventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        runtimeObjects.Add(esGo);
+        SceneManager.MoveGameObjectToScene(esGo, runtimeMenuScene);
+    }
+
+    private Button CreateMenuButton(RectTransform parent, string label, Vector2 anchoredPos, Vector2 size, int fontSize)
+    {
+        GameObject go = CreateUiObject(label + "Button", parent);
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = size;
+
+        Image image = go.AddComponent<Image>();
+        if (menuButtonNormal != null)
+        {
+            image.sprite = menuButtonNormal;
+            image.type = menuButtonNormal.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+            image.color = Color.white;
+        }
+        else
+        {
+            image.color = new Color(0f, 0f, 0f, 0.66f);
+        }
+
+        Button button = go.AddComponent<Button>();
+        button.targetGraphic = image;
+
+        SpriteState state = button.spriteState;
+        state.highlightedSprite = menuButtonHighlight != null ? menuButtonHighlight : menuButtonNormal;
+        state.pressedSprite = menuButtonPressed != null ? menuButtonPressed : menuButtonNormal;
+        state.selectedSprite = state.highlightedSprite;
+        button.spriteState = state;
+
+        ColorBlock colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = Color.white;
+        colors.pressedColor = Color.white;
+        colors.selectedColor = Color.white;
+        colors.disabledColor = new Color(1f, 1f, 1f, 0.5f);
+        colors.fadeDuration = 0.06f;
+        button.colors = colors;
+
+        Text text = CreateLabel(rt, label, Vector2.zero, size, fontSize, TextAnchor.MiddleCenter);
+        text.fontStyle = FontStyle.Bold;
+        text.color = Color.white;
+        AddOutline(text.gameObject, new Color(0f, 0f, 0f, 0.9f), new Vector2(2f, -2f));
+        return button;
+    }
+
+    private Text CreateLabel(RectTransform parent, string content, Vector2 anchoredPos, Vector2 size, int fontSize, TextAnchor align)
+    {
+        GameObject go = CreateUiObject("Label", parent);
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = size;
+
+        Text text = go.AddComponent<Text>();
+        text.text = content;
+        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        text.fontSize = fontSize;
+        text.alignment = align;
+        text.color = new Color(1f, 1f, 1f, 0.98f);
+        return text;
     }
 
     private void TogglePlaySubmenu()
     {
         if (playSubmenuRoot == null) return;
-        bool nextActive = !playSubmenuRoot.gameObject.activeSelf;
-        playSubmenuRoot.gameObject.SetActive(nextActive);
-        if (nextActive)
+        bool next = !playSubmenuRoot.gameObject.activeSelf;
+        playSubmenuRoot.gameObject.SetActive(next);
+        if (next)
         {
             RefreshSavedGamesList();
             ShowNotice(string.Empty);
@@ -430,74 +454,120 @@ public class MainMenuBootstrap : MonoBehaviour
         }
         saveEntryLabels.Clear();
 
+        List<string> files = new List<string>(64);
         string saveRoot = Path.Combine(Application.persistentDataPath, SaveFolderName);
-        List<string> saveFiles = new List<string>(32);
         if (Directory.Exists(saveRoot))
         {
-            AppendFiles(saveFiles, saveRoot, "*.save");
-            AppendFiles(saveFiles, saveRoot, "*.sav");
-            AppendFiles(saveFiles, saveRoot, "*.json");
-            saveFiles.Sort(StringComparer.OrdinalIgnoreCase);
+            AddFiles(files, saveRoot, "*.save");
+            AddFiles(files, saveRoot, "*.sav");
+            AddFiles(files, saveRoot, "*.json");
+            files.Sort(StringComparer.OrdinalIgnoreCase);
         }
 
-        if (saveFiles.Count == 0)
+        if (files.Count == 0)
         {
-            CreateSaveLabel("(No saved games yet)");
+            Text t = CreateSaveListLabel("(No saved games yet)");
+            t.color = new Color(1f, 1f, 1f, 0.72f);
             return;
         }
 
-        for (int i = 0; i < saveFiles.Count; i++)
+        int count = Mathf.Min(3, files.Count);
+        for (int i = 0; i < count; i++)
         {
-            string file = saveFiles[i];
-            string name = Path.GetFileNameWithoutExtension(file);
-            DateTime modified = File.GetLastWriteTime(file);
-            CreateSaveLabel(name + "  -  " + modified.ToString("yyyy-MM-dd HH:mm"));
+            string f = files[i];
+            string name = Path.GetFileNameWithoutExtension(f);
+            string stamp = File.GetLastWriteTime(f).ToString("yyyy-MM-dd HH:mm");
+            CreateSaveListLabel(name + "  -  " + stamp);
         }
     }
 
-    private static void AppendFiles(List<string> target, string root, string pattern)
+    private static void AddFiles(List<string> list, string root, string pattern)
     {
         string[] matches = Directory.GetFiles(root, pattern, SearchOption.TopDirectoryOnly);
         for (int i = 0; i < matches.Length; i++)
         {
-            target.Add(matches[i]);
+            list.Add(matches[i]);
         }
     }
 
-    private void CreateSaveLabel(string text)
+    private Text CreateSaveListLabel(string content)
     {
-        if (saveListRoot == null) return;
-        GameObject labelGo = CreateUiObject("SaveEntry", saveListRoot);
-        Text label = labelGo.AddComponent<Text>();
-        label.text = text;
-        label.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        label.fontSize = 22;
-        label.alignment = TextAnchor.MiddleLeft;
-        label.color = new Color(1f, 1f, 1f, 0.92f);
-        RectTransform rt = labelGo.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(420f, 34f);
+        float startY = -14f;
+        float spacing = 30f;
+        int idx = saveEntryLabels.Count;
+
+        Text label = CreateLabel(saveListRoot, content, new Vector2(0f, startY - (idx * spacing)), new Vector2(390f, 28f), 22, TextAnchor.MiddleLeft);
+        label.color = new Color(1f, 1f, 1f, 0.90f);
         saveEntryLabels.Add(label);
+        return label;
     }
 
     private void StartNewGame()
     {
+        if (sessionStarted) return;
+        StartCoroutine(StartNewGameRoutine());
+    }
+
+    private IEnumerator StartNewGameRoutine()
+    {
         sessionStarted = true;
-        ResumeGameplay();
-        if (menuCanvas != null)
+        if (menuCanvas != null) menuCanvas.enabled = false;
+
+        AsyncOperation loadOp = null;
+        if (gameplaySceneBuildIndex >= 0)
         {
-            Destroy(menuCanvas.gameObject);
+            loadOp = SceneManager.LoadSceneAsync(gameplaySceneBuildIndex, LoadSceneMode.Single);
+        }
+        else if (!string.IsNullOrEmpty(gameplayScenePath))
+        {
+            string cleanPath = gameplayScenePath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase)
+                ? gameplayScenePath.Substring(0, gameplayScenePath.Length - 6)
+                : gameplayScenePath;
+            loadOp = SceneManager.LoadSceneAsync(cleanPath, LoadSceneMode.Single);
+        }
+        else
+        {
+            string fallbackName = string.IsNullOrEmpty(gameplaySceneName) ? "SampleScene" : gameplaySceneName;
+            loadOp = SceneManager.LoadSceneAsync(fallbackName, LoadSceneMode.Single);
         }
 
-        for (int i = 0; i < runtimeCreatedObjects.Count; i++)
+        if (loadOp != null) yield return loadOp;
+
+        SetGameplaySystemsEnabled(true);
+        CleanupRuntimeMenuObjects();
+        Destroy(gameObject);
+    }
+
+    private void SetGameplaySystemsEnabled(bool enabled)
+    {
+        SpawnManager manager = SpawnManager.HasInstance ? SpawnManager.Instance : null;
+        if (manager != null) manager.enabled = enabled;
+
+        OverworldCreatureSpawner spawner = FindAnyObjectByType<OverworldCreatureSpawner>();
+        if (spawner != null) spawner.enabled = enabled;
+    }
+
+    private void CleanupRuntimeMenuObjects()
+    {
+        for (int i = 0; i < suspendedEventSystems.Count; i++)
         {
-            if (runtimeCreatedObjects[i] != null)
+            EventSystemState state = suspendedEventSystems[i];
+            if (state.eventSystem != null)
             {
-                Destroy(runtimeCreatedObjects[i]);
+                state.eventSystem.enabled = state.wasEnabled;
             }
         }
-        runtimeCreatedObjects.Clear();
+        suspendedEventSystems.Clear();
 
-        Destroy(gameObject);
+        for (int i = 0; i < runtimeObjects.Count; i++)
+        {
+            GameObject go = runtimeObjects[i];
+            if (go != null)
+            {
+                Destroy(go);
+            }
+        }
+        runtimeObjects.Clear();
     }
 
     private void ExitGame()
@@ -515,101 +585,12 @@ public class MainMenuBootstrap : MonoBehaviour
         noticeText.text = message ?? string.Empty;
     }
 
-    private Button CreateMenuButton(Transform parent, string label, float width, float height)
+    private static void AddOutline(GameObject target, Color color, Vector2 distance)
     {
-        GameObject buttonGo = CreateUiObject(label + "Button", parent);
-        Image buttonImage = buttonGo.AddComponent<Image>();
-        buttonImage.sprite = menuButtonNormal;
-        buttonImage.type = menuButtonNormal != null && menuButtonNormal.border.sqrMagnitude > 0f
-            ? Image.Type.Sliced
-            : Image.Type.Simple;
-        buttonImage.color = Color.white;
-
-        Button button = buttonGo.AddComponent<Button>();
-        button.targetGraphic = buttonImage;
-
-        SpriteState state = button.spriteState;
-        state.highlightedSprite = menuButtonHighlight != null ? menuButtonHighlight : menuButtonNormal;
-        state.pressedSprite = menuButtonPressed != null ? menuButtonPressed : menuButtonNormal;
-        state.selectedSprite = state.highlightedSprite;
-        button.spriteState = state;
-        ColorBlock colors = button.colors;
-        colors.normalColor = Color.white;
-        colors.highlightedColor = Color.white;
-        colors.pressedColor = Color.white;
-        colors.selectedColor = Color.white;
-        colors.disabledColor = new Color(1f, 1f, 1f, 0.5f);
-        colors.fadeDuration = 0.07f;
-        button.colors = colors;
-
-        RectTransform rt = buttonGo.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(width, height);
-
-        LayoutElement le = buttonGo.AddComponent<LayoutElement>();
-        le.preferredWidth = width;
-        le.preferredHeight = height;
-        le.minHeight = height;
-        le.minWidth = width;
-
-        GameObject textGo = CreateUiObject("Label", rt);
-        Text t = textGo.AddComponent<Text>();
-        t.text = label;
-        t.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        t.fontSize = 42;
-        t.fontStyle = FontStyle.Bold;
-        t.alignment = TextAnchor.MiddleCenter;
-        t.color = Color.white;
-        AddOutline(textGo, new Color(0f, 0f, 0f, 0.9f), new Vector2(2f, -2f));
-        RectTransform tRt = textGo.GetComponent<RectTransform>();
-        StretchRect(tRt);
-
-        menuButtons.Add(button);
-        return button;
-    }
-
-    private void EnsureButtonSpritesLoaded()
-    {
-#if UNITY_EDITOR
-        if (menuButtonNormal == null)
-        {
-            menuButtonNormal = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonNormalPath);
-        }
-        if (menuButtonHighlight == null)
-        {
-            menuButtonHighlight = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonHighlightPath);
-        }
-        if (menuButtonPressed == null)
-        {
-            menuButtonPressed = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonPressedPath);
-        }
-#endif
-    }
-
-    private Sprite TryLoadMainMenuArt()
-    {
-#if UNITY_EDITOR
-        Sprite s = TryLoadSpriteAtPath(PrimaryMenuArtPath);
-        if (s != null) return s;
-        s = TryLoadSpriteAtPath(FallbackMenuArtPath);
-        if (s != null) return s;
-#endif
-        Sprite fromResources = Resources.Load<Sprite>("UI/MainMenuArt");
-        if (fromResources != null) return fromResources;
-        return null;
-    }
-
-    private static Sprite TryLoadSpriteAtPath(string path)
-    {
-#if UNITY_EDITOR
-        Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
-        if (sprite != null) return sprite;
-        Texture2D tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-        if (tex != null)
-        {
-            return Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
-        }
-#endif
-        return null;
+        Outline outline = target.GetComponent<Outline>();
+        if (outline == null) outline = target.AddComponent<Outline>();
+        outline.effectColor = color;
+        outline.effectDistance = distance;
     }
 
     private static void StretchRect(RectTransform rt)
@@ -620,25 +601,72 @@ public class MainMenuBootstrap : MonoBehaviour
         rt.offsetMax = Vector2.zero;
     }
 
-    private static GameObject CreateUiObject(string name, Transform parent)
+    private static GameObject CreateUiObject(string name, Transform parent, params Type[] extraComponents)
     {
-        GameObject go = new GameObject(name, typeof(RectTransform));
+        List<Type> components = new List<Type>(2 + (extraComponents != null ? extraComponents.Length : 0));
+        components.Add(typeof(RectTransform));
+        if (extraComponents != null)
+        {
+            for (int i = 0; i < extraComponents.Length; i++)
+            {
+                if (extraComponents[i] != null) components.Add(extraComponents[i]);
+            }
+        }
+
+        GameObject go = new GameObject(name, components.ToArray());
         go.transform.SetParent(parent, false);
         return go;
     }
 
-    private static void AddOutline(GameObject target, Color color, Vector2 distance)
+    private static Texture2D TryLoadTexture(string path)
     {
-        Outline outline = target.GetComponent<Outline>();
-        if (outline == null) outline = target.AddComponent<Outline>();
-        outline.effectColor = color;
-        outline.effectDistance = distance;
+        if (string.IsNullOrEmpty(path)) return null;
+#if UNITY_EDITOR
+        Texture2D tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        if (tex != null) return tex;
+#endif
+        return null;
     }
 
-    private void EnsureEventSystemExists()
+#if UNITY_EDITOR
+    private static void EnsureTextureQualityForMenu(string texturePath)
     {
-        if (EventSystem.current != null) return;
-        GameObject es = new GameObject("MainMenuEventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
-        runtimeCreatedObjects.Add(es);
+        if (string.IsNullOrEmpty(texturePath)) return;
+        TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+        if (importer == null) return;
+
+        bool changed = false;
+
+        if (importer.textureCompression != TextureImporterCompression.Uncompressed)
+        {
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            changed = true;
+        }
+        if (importer.mipmapEnabled)
+        {
+            importer.mipmapEnabled = false;
+            changed = true;
+        }
+        if (importer.npotScale != TextureImporterNPOTScale.None)
+        {
+            importer.npotScale = TextureImporterNPOTScale.None;
+            changed = true;
+        }
+        if (importer.maxTextureSize < 4096)
+        {
+            importer.maxTextureSize = 4096;
+            changed = true;
+        }
+        if (importer.filterMode != FilterMode.Bilinear)
+        {
+            importer.filterMode = FilterMode.Bilinear;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            importer.SaveAndReimport();
+        }
     }
+#endif
 }
