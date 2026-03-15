@@ -360,7 +360,7 @@ public static class ActivePartyFollowerBootstrap
         if (string.Equals(scene.name, RuntimeMenuSceneName, StringComparison.Ordinal)) return;
         if (MainMenuBootstrap.IsMenuOpen) return;
 
-        PlayerMover mover = Object.FindFirstObjectByType<PlayerMover>();
+        PlayerMover mover = UnityEngine.Object.FindFirstObjectByType<PlayerMover>();
         if (mover == null) return;
 
         if (mover.GetComponent<PlayerCreatureParty>() == null)
