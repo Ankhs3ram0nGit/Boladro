@@ -29,7 +29,6 @@ public class MainMenuBootstrap : MonoBehaviour
     private int gameplaySceneBuildIndex = -1;
 
     private Scene runtimeMenuScene;
-    private Camera menuCamera;
     private Canvas menuCanvas;
     private RectTransform playSubmenuRoot;
     private RectTransform saveListRoot;
@@ -116,7 +115,6 @@ public class MainMenuBootstrap : MonoBehaviour
 
     private IEnumerator EnterMenuStateRoutine()
     {
-        SetGameplaySystemsEnabled(false);
         yield return null;
 
         Scene gameplayScene = ResolveCapturedGameplayScene();
@@ -125,8 +123,6 @@ public class MainMenuBootstrap : MonoBehaviour
             AsyncOperation unload = SceneManager.UnloadSceneAsync(gameplayScene);
             if (unload != null) yield return unload;
         }
-
-        SetGameplaySystemsEnabled(false);
     }
 
     private void CaptureGameplaySceneReference()
@@ -187,7 +183,6 @@ public class MainMenuBootstrap : MonoBehaviour
     private void BuildMenuUi()
     {
         EnsureMenuAssetsLoaded();
-        EnsureMenuCamera();
         EnsureEventSystem();
 
         GameObject canvasGo = CreateUiObject("MainMenuCanvas", transform, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -195,10 +190,8 @@ public class MainMenuBootstrap : MonoBehaviour
         SceneManager.MoveGameObjectToScene(canvasGo, runtimeMenuScene);
 
         menuCanvas = canvasGo.GetComponent<Canvas>();
-        menuCanvas.renderMode = RenderMode.ScreenSpaceCamera;
-        menuCanvas.worldCamera = menuCamera;
-        menuCanvas.planeDistance = 1f;
-        menuCanvas.sortingOrder = 500;
+        menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        menuCanvas.sortingOrder = short.MaxValue - 32;
 
         CanvasScaler scaler = canvasGo.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -337,26 +330,6 @@ public class MainMenuBootstrap : MonoBehaviour
             menuButtonPressed = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonPressedPath);
         }
 #endif
-    }
-
-    private void EnsureMenuCamera()
-    {
-        GameObject camGo = new GameObject("MainMenuCamera");
-        runtimeObjects.Add(camGo);
-        SceneManager.MoveGameObjectToScene(camGo, runtimeMenuScene);
-
-        menuCamera = camGo.AddComponent<Camera>();
-        menuCamera.clearFlags = CameraClearFlags.SolidColor;
-        menuCamera.backgroundColor = new Color(0f, 0f, 0f, 1f);
-        menuCamera.orthographic = true;
-        menuCamera.orthographicSize = 5f;
-        menuCamera.nearClipPlane = -20f;
-        menuCamera.farClipPlane = 20f;
-        menuCamera.cullingMask = ~0;
-        menuCamera.depth = -100f;
-
-        AudioListener listener = camGo.AddComponent<AudioListener>();
-        listener.enabled = true;
     }
 
     private void EnsureEventSystem()
@@ -549,18 +522,8 @@ public class MainMenuBootstrap : MonoBehaviour
 
         if (loadOp != null) yield return loadOp;
 
-        SetGameplaySystemsEnabled(true);
         CleanupRuntimeMenuObjects();
         Destroy(gameObject);
-    }
-
-    private void SetGameplaySystemsEnabled(bool enabled)
-    {
-        SpawnManager manager = SpawnManager.HasInstance ? SpawnManager.Instance : null;
-        if (manager != null) manager.enabled = enabled;
-
-        OverworldCreatureSpawner spawner = FindAnyObjectByType<OverworldCreatureSpawner>();
-        if (spawner != null) spawner.enabled = enabled;
     }
 
     private void CleanupRuntimeMenuObjects()
