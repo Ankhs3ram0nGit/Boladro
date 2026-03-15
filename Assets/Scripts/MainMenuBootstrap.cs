@@ -180,6 +180,7 @@ public class MainMenuBootstrap : MonoBehaviour
         {
             GameObject root = roots[i];
             if (root == null) continue;
+            if (HasActiveCameraInHierarchy(root)) continue;
             suspendedRootObjects.Add(new GameObjectState
             {
                 target = root,
@@ -190,6 +191,22 @@ public class MainMenuBootstrap : MonoBehaviour
                 root.SetActive(false);
             }
         }
+    }
+
+    private static bool HasActiveCameraInHierarchy(GameObject root)
+    {
+        if (root == null) return false;
+        Camera[] cams = root.GetComponentsInChildren<Camera>(true);
+        if (cams == null || cams.Length == 0) return false;
+        for (int i = 0; i < cams.Length; i++)
+        {
+            Camera c = cams[i];
+            if (c == null) continue;
+            if (!c.enabled) continue;
+            if (!c.gameObject.activeInHierarchy) continue;
+            return true;
+        }
+        return false;
     }
 
     private void SuspendAllOfType<T>() where T : Behaviour
