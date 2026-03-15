@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
+using UnityEngine.SceneManagement;
+using System;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(PlayerCreatureParty))]
@@ -330,9 +332,34 @@ public class ActivePartyFollowerController : MonoBehaviour
 
 public static class ActivePartyFollowerBootstrap
 {
+    private const string RuntimeMenuSceneName = "__RuntimeMainMenuScene";
+    private static bool sceneHooked;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void EnsureFollowerController()
     {
+        EnsureSceneHook();
+        EnsureFollowerControllerForScene(SceneManager.GetActiveScene());
+    }
+
+    private static void EnsureSceneHook()
+    {
+        if (sceneHooked) return;
+        SceneManager.sceneLoaded += OnSceneLoaded;
+        sceneHooked = true;
+    }
+
+    private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        EnsureFollowerControllerForScene(scene);
+    }
+
+    private static void EnsureFollowerControllerForScene(Scene scene)
+    {
+        if (!scene.IsValid() || !scene.isLoaded) return;
+        if (string.Equals(scene.name, RuntimeMenuSceneName, StringComparison.Ordinal)) return;
+        if (MainMenuBootstrap.IsMenuOpen) return;
+
         PlayerMover mover = Object.FindFirstObjectByType<PlayerMover>();
         if (mover == null) return;
 

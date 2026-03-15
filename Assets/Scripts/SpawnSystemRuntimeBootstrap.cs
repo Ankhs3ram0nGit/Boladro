@@ -1,12 +1,48 @@
 using UnityEngine;
 using UnityEngine.Tilemaps;
+using UnityEngine.SceneManagement;
+using System;
 
 public class SpawnSystemRuntimeBootstrap : MonoBehaviour
 {
     private const string ZoneConfigResourcePath = "SpawnConfigs/VerdantCrossing_OpenMeadow";
+    private const string RuntimeMenuSceneName = "__RuntimeMainMenuScene";
+    private static bool sceneHooked;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Bootstrap()
+    {
+        EnsureSceneHook();
+        BootstrapForScene(SceneManager.GetActiveScene());
+    }
+
+    private static void EnsureSceneHook()
+    {
+        if (sceneHooked) return;
+        SceneManager.sceneLoaded += OnSceneLoaded;
+        sceneHooked = true;
+    }
+
+    private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        BootstrapForScene(scene);
+    }
+
+    private static bool ShouldSkipScene(Scene scene)
+    {
+        if (!scene.IsValid() || !scene.isLoaded) return true;
+        if (string.Equals(scene.name, RuntimeMenuSceneName, StringComparison.Ordinal)) return true;
+        if (MainMenuBootstrap.IsMenuOpen) return true;
+        return false;
+    }
+
+    private static void BootstrapForScene(Scene scene)
+    {
+        if (ShouldSkipScene(scene)) return;
+        BootstrapGameplayRuntime();
+    }
+
+    private static void BootstrapGameplayRuntime()
     {
         SpawnManager manager = SpawnManager.Instance;
         if (manager == null) return;
@@ -24,6 +60,23 @@ public class SpawnSystemRuntimeBootstrap : MonoBehaviour
             {
                 player.transform.localScale = new Vector3(0.8f, 0.8f, player.transform.localScale.z);
             }
+
+            PlayerCreatureParty party = player.GetComponent<PlayerCreatureParty>();
+            if (party == null)
+            {
+                party = player.AddComponent<PlayerCreatureParty>();
+            }
+            if (party.ActiveCreatures == null || party.ActiveCreatures.Count == 0)
+            {
+                party.InitializeParty();
+            }
+
+            ActivePartyFollowerController followerController = player.GetComponent<ActivePartyFollowerController>();
+            if (followerController == null)
+            {
+                followerController = player.AddComponent<ActivePartyFollowerController>();
+            }
+            followerController.enabled = true;
 
             EncounterTrigger trigger = player.GetComponent<EncounterTrigger>();
             if (trigger != null && trigger.encounterTilemap == null)
@@ -51,6 +104,13 @@ public class SpawnSystemRuntimeBootstrap : MonoBehaviour
                 miniMap = player.AddComponent<MiniMapController>();
             }
             miniMap.enabled = true;
+
+            PlayerGroundShadow playerShadow = player.GetComponent<PlayerGroundShadow>();
+            if (playerShadow == null)
+            {
+                playerShadow = player.AddComponent<PlayerGroundShadow>();
+            }
+            playerShadow.enabled = true;
         }
 
         SpawnZone[] zones = FindObjectsByType<SpawnZone>(FindObjectsSortMode.None);
@@ -97,14 +157,28 @@ public class SpawnSystemRuntimeBootstrap : MonoBehaviour
         {
             spawner = manager.gameObject.AddComponent<OverworldCreatureSpawner>();
         }
-        if (spawner != null) spawner.enabled = true;
+        if (spawner != null)
+        {
+            // Force a fresh OnEnable pass after scene transitions.
+            bool wasEnabled = spawner.enabled;
+            spawner.enabled = false;
+            spawner.enabled = true;
+            if (!wasEnabled) spawner.enabled = true;
+        }
 
         WorldRockSpriteNormalizer rockNormalizer = manager.GetComponent<WorldRockSpriteNormalizer>();
         if (rockNormalizer == null)
         {
             rockNormalizer = manager.gameObject.AddComponent<WorldRockSpriteNormalizer>();
         }
-        if (rockNormalizer != null) rockNormalizer.enabled = true;
+        if (rockNormalizer != null)
+        {
+            // Re-apply stone normalization for freshly loaded scene renderers.
+            bool wasEnabled = rockNormalizer.enabled;
+            rockNormalizer.enabled = false;
+            rockNormalizer.enabled = true;
+            if (!wasEnabled) rockNormalizer.enabled = true;
+        }
     }
 
     static SpawnZone CreateDefaultZone(Tilemap ground, AreaSpawnConfig configuredZoneConfig)
