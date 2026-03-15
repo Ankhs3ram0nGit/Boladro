@@ -59,9 +59,25 @@ public class MainMenuBootstrap : MonoBehaviour
         sessionStarted = false;
     }
 
+#if UNITY_EDITOR
+    [InitializeOnEnterPlayMode]
+    private static void ResetStaticsOnEnterPlayMode(EnterPlayModeOptions options)
+    {
+        instance = null;
+        sessionStarted = false;
+    }
+#endif
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void EnsureInstance()
     {
+        // Recover when Enter Play Mode uses disabled domain reload:
+        // static bool can remain true from prior session while instance is gone.
+        if (sessionStarted && instance == null)
+        {
+            sessionStarted = false;
+        }
+
         if (sessionStarted) return;
         if (instance != null) return;
 
