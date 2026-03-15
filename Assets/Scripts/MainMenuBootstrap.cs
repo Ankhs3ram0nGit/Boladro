@@ -12,7 +12,7 @@ using UnityEditor;
 [DefaultExecutionOrder(-700)]
 public class MainMenuBootstrap : MonoBehaviour
 {
-    private const string PrimaryMenuArtPath = "Assets/UI/MainMenuArt.png";
+    private const string PrimaryMenuArtPath = "Assets/UI Soundpack/menu.png";
     private const string FallbackMenuArtPath = "Assets/ChatGPT Image Mar 12, 2026, 08_41_45 PM.png";
     private const string MenuButtonNormalPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_1.png";
     private const string MenuButtonHighlightPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_2.png";
