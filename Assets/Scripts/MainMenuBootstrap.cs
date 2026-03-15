@@ -43,6 +43,7 @@ public class MainMenuBootstrap : MonoBehaviour
     private Sprite menuButtonHighlight;
     private Sprite menuButtonPressed;
     private Texture2D menuBackgroundTexture;
+    private Font menuFont;
 
     [Header("Background Framing")]
     [Range(1f, 1.3f)] public float backgroundZoom = 1.02f;
@@ -118,13 +119,22 @@ public class MainMenuBootstrap : MonoBehaviour
         EnsureRuntimeMenuScene();
         try
         {
+            EnsureMenuFont();
             BuildMenuUi();
             menuActive = true;
         }
         catch (Exception ex)
         {
             Debug.LogError("MainMenuBootstrap: Failed to build menu UI. " + ex.Message);
-            BuildEmergencyMenuUi();
+            try
+            {
+                EnsureMenuFont();
+                BuildEmergencyMenuUi();
+            }
+            catch (Exception emergencyEx)
+            {
+                Debug.LogError("MainMenuBootstrap: Emergency menu failed. " + emergencyEx.Message);
+            }
             menuActive = true;
         }
         StartCoroutine(EnterMenuStateRoutine());
@@ -134,22 +144,50 @@ public class MainMenuBootstrap : MonoBehaviour
     {
         yield return null;
 
-        Scene gameplayScene = ResolveCapturedGameplayScene();
-        if (gameplayScene.IsValid() && gameplayScene.isLoaded)
+        List<Scene> loadedScenes = new List<Scene>(SceneManager.sceneCount);
+        for (int i = 0; i < SceneManager.sceneCount; i++)
         {
-            AsyncOperation unload = SceneManager.UnloadSceneAsync(gameplayScene);
+            Scene s = SceneManager.GetSceneAt(i);
+            if (!s.IsValid() || !s.isLoaded) continue;
+            loadedScenes.Add(s);
+        }
+
+        Scene fallbackGameplayScene = default;
+        for (int i = 0; i < loadedScenes.Count; i++)
+        {
+            Scene scene = loadedScenes[i];
+            if (string.Equals(scene.name, RuntimeMenuSceneName, StringComparison.Ordinal)) continue;
+
+            bool isRuntimeScene = scene.buildIndex < 0 && string.IsNullOrEmpty(scene.path);
+            if (isRuntimeScene) continue;
+
+            if (!fallbackGameplayScene.IsValid())
+            {
+                fallbackGameplayScene = scene;
+            }
+        }
+
+        if (fallbackGameplayScene.IsValid())
+        {
+            CaptureGameplaySceneReferenceFromScene(fallbackGameplayScene);
+        }
+
+        for (int i = 0; i < loadedScenes.Count; i++)
+        {
+            Scene scene = loadedScenes[i];
+            if (string.Equals(scene.name, RuntimeMenuSceneName, StringComparison.Ordinal)) continue;
+            bool isRuntimeScene = scene.buildIndex < 0 && string.IsNullOrEmpty(scene.path);
+            if (isRuntimeScene) continue;
+
+            AsyncOperation unload = SceneManager.UnloadSceneAsync(scene);
             if (unload != null)
             {
                 yield return unload;
             }
             else
             {
-                Debug.LogWarning("MainMenuBootstrap: gameplay scene unload request returned null for " + gameplayScene.name);
+                Debug.LogWarning("MainMenuBootstrap: scene unload request returned null for " + scene.name);
             }
-        }
-        else
-        {
-            Debug.LogWarning("MainMenuBootstrap: could not resolve gameplay scene to unload; menu will still stay active.");
         }
     }
 
@@ -275,7 +313,7 @@ public class MainMenuBootstrap : MonoBehaviour
         GameObject titleGo = CreateUiObject("Title", canvasRect);
         Text title = titleGo.AddComponent<Text>();
         title.text = "RIFTBORN";
-        title.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        title.font = menuFont;
         title.fontSize = 116;
         title.fontStyle = FontStyle.Bold;
         title.alignment = TextAnchor.MiddleCenter;
@@ -475,7 +513,7 @@ public class MainMenuBootstrap : MonoBehaviour
 
         Text text = go.AddComponent<Text>();
         text.text = content;
-        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        text.font = menuFont;
         text.fontSize = fontSize;
         text.alignment = align;
         text.color = new Color(1f, 1f, 1f, 0.98f);
@@ -670,6 +708,41 @@ public class MainMenuBootstrap : MonoBehaviour
         if (tex != null) return tex;
 #endif
         return null;
+    }
+
+    private void EnsureMenuFont()
+    {
+        if (menuFont != null) return;
+
+        try
+        {
+            menuFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        }
+        catch
+        {
+            // Ignore and try fallback below.
+        }
+
+        if (menuFont == null)
+        {
+            try
+            {
+                menuFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            }
+            catch
+            {
+                // Last resort below.
+            }
+        }
+
+        if (menuFont == null)
+        {
+            Font[] anyFonts = Resources.FindObjectsOfTypeAll<Font>();
+            if (anyFonts != null && anyFonts.Length > 0)
+            {
+                menuFont = anyFonts[0];
+            }
+        }
     }
 
 }
