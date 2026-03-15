@@ -219,6 +219,7 @@ public class MiniMapController : MonoBehaviour
     void EnsureMinimapUi()
     {
         if (canvas == null) return;
+        CleanupStaleMiniMapRoots();
 
         Transform existing = canvas.transform.Find(RootName);
         if (existing == null)
@@ -275,6 +276,21 @@ public class MiniMapController : MonoBehaviour
         EnsurePlayerMarker(rootRect);
         EnsureActiveCreatureMarker(mapRectTransform);
         RequestMinimapRender();
+    }
+
+    void CleanupStaleMiniMapRoots()
+    {
+        RectTransform[] allRects = FindObjectsByType<RectTransform>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < allRects.Length; i++)
+        {
+            RectTransform rt = allRects[i];
+            if (rt == null) continue;
+            if (!string.Equals(rt.name, RootName, System.StringComparison.Ordinal)) continue;
+            if (canvas != null && rt.transform.parent == canvas.transform) continue;
+
+            if (Application.isPlaying) Destroy(rt.gameObject);
+            else DestroyImmediate(rt.gameObject);
+        }
     }
 
     void EnsureCreatureBlipLayer(RectTransform mapRect)

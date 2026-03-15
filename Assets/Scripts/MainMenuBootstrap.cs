@@ -23,12 +23,12 @@ public class MainMenuBootstrap : MonoBehaviour
 
     private static MainMenuBootstrap instance;
     private static bool sessionStarted;
-    public static bool IsMenuOpen => instance != null && !sessionStarted;
+    public static bool IsMenuOpen => instance != null && instance.menuActive && !sessionStarted;
 
     private string gameplayScenePath;
     private string gameplaySceneName;
     private int gameplaySceneBuildIndex = -1;
-    private bool menuInitialized;
+    private bool menuActive;
 
     private Scene runtimeMenuScene;
     private Canvas menuCanvas;
@@ -113,32 +113,21 @@ public class MainMenuBootstrap : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
-        StartCoroutine(InitializeMenuWhenGameplaySceneReady());
-    }
-
-    private IEnumerator InitializeMenuWhenGameplaySceneReady()
-    {
-        if (menuInitialized) yield break;
-
-        Scene gameplayScene = default;
-        while (true)
-        {
-            Scene active = SceneManager.GetActiveScene();
-            if (active.IsValid() && active.isLoaded && !string.Equals(active.name, RuntimeMenuSceneName, StringComparison.Ordinal))
-            {
-                gameplayScene = active;
-                break;
-            }
-            yield return null;
-        }
-
-        if (sessionStarted) yield break;
-
-        CaptureGameplaySceneReferenceFromScene(gameplayScene);
+        Scene activeScene = SceneManager.GetActiveScene();
+        CaptureGameplaySceneReferenceFromScene(activeScene);
         EnsureRuntimeMenuScene();
-        BuildMenuUi();
-        menuInitialized = true;
-        yield return StartCoroutine(EnterMenuStateRoutine());
+        try
+        {
+            BuildMenuUi();
+            menuActive = true;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("MainMenuBootstrap: Failed to build menu UI. " + ex.Message);
+            BuildEmergencyMenuUi();
+            menuActive = true;
+        }
+        StartCoroutine(EnterMenuStateRoutine());
     }
 
     private IEnumerator EnterMenuStateRoutine()
@@ -149,7 +138,18 @@ public class MainMenuBootstrap : MonoBehaviour
         if (gameplayScene.IsValid() && gameplayScene.isLoaded)
         {
             AsyncOperation unload = SceneManager.UnloadSceneAsync(gameplayScene);
-            if (unload != null) yield return unload;
+            if (unload != null)
+            {
+                yield return unload;
+            }
+            else
+            {
+                Debug.LogWarning("MainMenuBootstrap: gameplay scene unload request returned null for " + gameplayScene.name);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("MainMenuBootstrap: could not resolve gameplay scene to unload; menu will still stay active.");
         }
     }
 
@@ -332,11 +332,46 @@ public class MainMenuBootstrap : MonoBehaviour
         AddOutline(noticeText.gameObject, new Color(0f, 0f, 0f, 0.85f), new Vector2(2f, -2f));
     }
 
+    private void BuildEmergencyMenuUi()
+    {
+        EnsureEventSystem();
+
+        GameObject canvasGo = CreateUiObject("MainMenuCanvasEmergency", transform, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        runtimeObjects.Add(canvasGo);
+        SceneManager.MoveGameObjectToScene(canvasGo, runtimeMenuScene);
+
+        menuCanvas = canvasGo.GetComponent<Canvas>();
+        menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        menuCanvas.sortingOrder = short.MaxValue - 16;
+
+        CanvasScaler scaler = canvasGo.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        scaler.matchWidthOrHeight = 0.5f;
+
+        RectTransform root = canvasGo.GetComponent<RectTransform>();
+        StretchRect(root);
+
+        Image bg = CreateUiObject("EmergencyBG", root).AddComponent<Image>();
+        StretchRect(bg.rectTransform);
+        bg.color = new Color(0f, 0f, 0f, 0.88f);
+
+        Text title = CreateLabel(root, "RIFTBORN", new Vector2(0f, 140f), new Vector2(1000f, 120f), 96, TextAnchor.MiddleCenter);
+        title.fontStyle = FontStyle.Bold;
+        AddOutline(title.gameObject, new Color(0f, 0f, 0f, 1f), new Vector2(3f, -3f));
+
+        Button newGameButton = CreateMenuButton(root, "New Game", new Vector2(0f, 10f), new Vector2(420f, 76f), 38);
+        newGameButton.onClick.AddListener(StartNewGame);
+
+        Button exitButton = CreateMenuButton(root, "Exit", new Vector2(0f, -92f), new Vector2(420f, 76f), 38);
+        exitButton.onClick.AddListener(ExitGame);
+
+        noticeText = CreateLabel(root, "Fallback menu active.", new Vector2(0f, -200f), new Vector2(1200f, 60f), 28, TextAnchor.MiddleCenter);
+    }
+
     private void EnsureMenuAssetsLoaded()
     {
-#if UNITY_EDITOR
-        EnsureTextureQualityForMenu(PrimaryMenuTexturePath);
-#endif
         menuBackgroundTexture = TryLoadTexture(PrimaryMenuTexturePath);
         if (menuBackgroundTexture == null)
         {
@@ -527,6 +562,7 @@ public class MainMenuBootstrap : MonoBehaviour
     private IEnumerator StartNewGameRoutine()
     {
         sessionStarted = true;
+        menuActive = false;
         if (menuCanvas != null) menuCanvas.enabled = false;
 
         AsyncOperation loadOp = null;
@@ -634,45 +670,4 @@ public class MainMenuBootstrap : MonoBehaviour
         return null;
     }
 
-#if UNITY_EDITOR
-    private static void EnsureTextureQualityForMenu(string texturePath)
-    {
-        if (string.IsNullOrEmpty(texturePath)) return;
-        TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
-        if (importer == null) return;
-
-        bool changed = false;
-
-        if (importer.textureCompression != TextureImporterCompression.Uncompressed)
-        {
-            importer.textureCompression = TextureImporterCompression.Uncompressed;
-            changed = true;
-        }
-        if (importer.mipmapEnabled)
-        {
-            importer.mipmapEnabled = false;
-            changed = true;
-        }
-        if (importer.npotScale != TextureImporterNPOTScale.None)
-        {
-            importer.npotScale = TextureImporterNPOTScale.None;
-            changed = true;
-        }
-        if (importer.maxTextureSize < 4096)
-        {
-            importer.maxTextureSize = 4096;
-            changed = true;
-        }
-        if (importer.filterMode != FilterMode.Bilinear)
-        {
-            importer.filterMode = FilterMode.Bilinear;
-            changed = true;
-        }
-
-        if (changed)
-        {
-            importer.SaveAndReimport();
-        }
-    }
-#endif
 }
