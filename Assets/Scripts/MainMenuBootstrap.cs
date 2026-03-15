@@ -212,9 +212,10 @@ public class MainMenuBootstrap : MonoBehaviour
         EnsureMenuAssetsLoaded();
         EnsureEventSystem();
 
-        GameObject canvasGo = CreateUiObject("MainMenuCanvas", transform, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        GameObject canvasGo = new GameObject("MainMenuCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         runtimeObjects.Add(canvasGo);
         SceneManager.MoveGameObjectToScene(canvasGo, runtimeMenuScene);
+        canvasGo.transform.SetParent(transform, false);
 
         menuCanvas = canvasGo.GetComponent<Canvas>();
         menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -336,9 +337,10 @@ public class MainMenuBootstrap : MonoBehaviour
     {
         EnsureEventSystem();
 
-        GameObject canvasGo = CreateUiObject("MainMenuCanvasEmergency", transform, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        GameObject canvasGo = new GameObject("MainMenuCanvasEmergency", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         runtimeObjects.Add(canvasGo);
         SceneManager.MoveGameObjectToScene(canvasGo, runtimeMenuScene);
+        canvasGo.transform.SetParent(transform, false);
 
         menuCanvas = canvasGo.GetComponent<Canvas>();
         menuCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
