@@ -14,8 +14,9 @@ using UnityEditor;
 public class MainMenuBootstrap : MonoBehaviour
 {
     private const string RuntimeMenuSceneName = "__RuntimeMainMenuScene";
-    private const string PrimaryMenuTexturePath = "Assets/UI Soundpack/menu.png";
+    private const string PrimaryMenuTexturePath = "Assets/UI Soundpack/Menu Image FR.png";
     private const string FallbackMenuTexturePath = "Assets/ChatGPT Image Mar 12, 2026, 08_41_45 PM.png";
+    private const string MenuPanelFramePath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Frame01a.png";
     private const string MenuButtonNormalPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_1.png";
     private const string MenuButtonHighlightPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_2.png";
     private const string MenuButtonPressedPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_3.png";
@@ -39,9 +40,14 @@ public class MainMenuBootstrap : MonoBehaviour
     private readonly List<GameObject> runtimeObjects = new List<GameObject>(32);
     private readonly List<EventSystemState> suspendedEventSystems = new List<EventSystemState>(4);
 
+    private Camera menuCamera;
+    private Button settingsButton;
+    private Button creditsButton;
+    private Button exitButton;
     private Sprite menuButtonNormal;
     private Sprite menuButtonHighlight;
     private Sprite menuButtonPressed;
+    private Sprite menuPanelFrame;
     private Texture2D menuBackgroundTexture;
     private Font menuFont;
 
@@ -143,6 +149,8 @@ public class MainMenuBootstrap : MonoBehaviour
     private IEnumerator EnterMenuStateRoutine()
     {
         yield return null;
+        ApplyMenuPauseState(true);
+        EnsureMenuCamera();
 
         List<Scene> loadedScenes = new List<Scene>(SceneManager.sceneCount);
         for (int i = 0; i < SceneManager.sceneCount; i++)
@@ -245,10 +253,40 @@ public class MainMenuBootstrap : MonoBehaviour
         SceneManager.SetActiveScene(runtimeMenuScene);
     }
 
+    private void EnsureMenuCamera()
+    {
+        if (menuCamera != null) return;
+
+        GameObject cameraGo = new GameObject("MainMenuCamera", typeof(Camera));
+        runtimeObjects.Add(cameraGo);
+        SceneManager.MoveGameObjectToScene(cameraGo, runtimeMenuScene);
+        cameraGo.transform.SetParent(transform, false);
+
+        Camera cam = cameraGo.GetComponent<Camera>();
+        cam.clearFlags = CameraClearFlags.SolidColor;
+        cam.backgroundColor = Color.black;
+        cam.orthographic = true;
+        cam.orthographicSize = 5f;
+        cam.cullingMask = 0;
+        cam.nearClipPlane = 0.01f;
+        cam.farClipPlane = 10f;
+        cam.depth = -1000f;
+        cam.enabled = true;
+
+        menuCamera = cam;
+    }
+
+    private static void ApplyMenuPauseState(bool pause)
+    {
+        Time.timeScale = pause ? 0f : 1f;
+        AudioListener.pause = pause;
+    }
+
     private void BuildMenuUi()
     {
         EnsureMenuAssetsLoaded();
         EnsureEventSystem();
+        EnsureMenuCamera();
 
         GameObject canvasGo = new GameObject("MainMenuCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         runtimeObjects.Add(canvasGo);
@@ -299,71 +337,66 @@ public class MainMenuBootstrap : MonoBehaviour
         Image dim = dimGo.AddComponent<Image>();
         RectTransform dimRect = dim.rectTransform;
         StretchRect(dimRect);
-        dim.color = new Color(0f, 0f, 0f, 0.30f);
+        dim.color = new Color(0f, 0f, 0f, 0.16f);
 
         GameObject leftPanelGo = CreateUiObject("MenuPanel", canvasRect);
         Image leftPanel = leftPanelGo.AddComponent<Image>();
-        leftPanel.color = new Color(0f, 0f, 0f, 0.52f);
+        if (menuPanelFrame != null)
+        {
+            leftPanel.sprite = menuPanelFrame;
+            leftPanel.type = menuPanelFrame.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
+            leftPanel.color = new Color(1f, 1f, 1f, 0.95f);
+        }
+        else
+        {
+            leftPanel.color = new Color(0f, 0f, 0f, 0.52f);
+        }
         RectTransform panelRect = leftPanel.rectTransform;
-        panelRect.anchorMin = new Vector2(0.03f, 0.10f);
-        panelRect.anchorMax = new Vector2(0.35f, 0.90f);
+        panelRect.anchorMin = new Vector2(0.01f, 0.10f);
+        panelRect.anchorMax = new Vector2(0.24f, 0.90f);
         panelRect.offsetMin = Vector2.zero;
         panelRect.offsetMax = Vector2.zero;
 
-        GameObject titleGo = CreateUiObject("Title", canvasRect);
-        Text title = titleGo.AddComponent<Text>();
-        title.text = "RIFTBORN";
-        title.font = menuFont;
-        title.fontSize = 116;
-        title.fontStyle = FontStyle.Bold;
-        title.alignment = TextAnchor.MiddleCenter;
-        title.color = new Color(1f, 0.88f, 0.35f, 1f);
-        AddOutline(titleGo, new Color(0f, 0f, 0f, 0.95f), new Vector2(4f, -4f));
-        RectTransform titleRect = titleGo.GetComponent<RectTransform>();
-        titleRect.anchorMin = new Vector2(0.5f, 1f);
-        titleRect.anchorMax = new Vector2(0.5f, 1f);
-        titleRect.pivot = new Vector2(0.5f, 1f);
-        titleRect.sizeDelta = new Vector2(1280f, 190f);
-        titleRect.anchoredPosition = new Vector2(0f, -20f);
-
         RectTransform menuRoot = CreateUiObject("MenuButtons", leftPanel.rectTransform).GetComponent<RectTransform>();
-        menuRoot.anchorMin = new Vector2(0.5f, 0.5f);
-        menuRoot.anchorMax = new Vector2(0.5f, 0.5f);
-        menuRoot.pivot = new Vector2(0.5f, 0.5f);
-        menuRoot.sizeDelta = new Vector2(480f, 560f);
-        menuRoot.anchoredPosition = new Vector2(0f, 0f);
+        menuRoot.anchorMin = new Vector2(0f, 0.5f);
+        menuRoot.anchorMax = new Vector2(0f, 0.5f);
+        menuRoot.pivot = new Vector2(0f, 0.5f);
+        menuRoot.sizeDelta = new Vector2(340f, 560f);
+        menuRoot.anchoredPosition = new Vector2(10f, 0f);
 
-        Button playButton = CreateMenuButton(menuRoot, "Play", new Vector2(0f, 190f), new Vector2(430f, 76f), 42);
+        const float buttonWidth = 301f; // 30% shorter than previous 430.
+
+        Button playButton = CreateMenuButton(menuRoot, "Play", new Vector2(buttonWidth * 0.5f, 190f), new Vector2(buttonWidth, 76f), 42);
         playButton.onClick.AddListener(TogglePlaySubmenu);
 
         playSubmenuRoot = CreateUiObject("PlaySubmenu", menuRoot).GetComponent<RectTransform>();
-        playSubmenuRoot.anchorMin = new Vector2(0.5f, 0.5f);
-        playSubmenuRoot.anchorMax = new Vector2(0.5f, 0.5f);
-        playSubmenuRoot.pivot = new Vector2(0.5f, 0.5f);
-        playSubmenuRoot.sizeDelta = new Vector2(430f, 180f);
+        playSubmenuRoot.anchorMin = new Vector2(0f, 0.5f);
+        playSubmenuRoot.anchorMax = new Vector2(0f, 0.5f);
+        playSubmenuRoot.pivot = new Vector2(0f, 0.5f);
+        playSubmenuRoot.sizeDelta = new Vector2(buttonWidth, 180f);
         playSubmenuRoot.anchoredPosition = new Vector2(0f, 70f);
         playSubmenuRoot.gameObject.SetActive(false);
 
-        Button newGameButton = CreateMenuButton(playSubmenuRoot, "New Game", new Vector2(0f, 50f), new Vector2(390f, 64f), 34);
+        Button newGameButton = CreateMenuButton(playSubmenuRoot, "New Game", new Vector2(buttonWidth * 0.5f, 50f), new Vector2(buttonWidth - 24f, 64f), 34);
         newGameButton.onClick.AddListener(StartNewGame);
 
-        Text saveHeader = CreateLabel(playSubmenuRoot, "Saved Games", new Vector2(0f, 8f), new Vector2(390f, 34f), 26, TextAnchor.MiddleLeft);
+        Text saveHeader = CreateLabel(playSubmenuRoot, "Saved Games", new Vector2(buttonWidth * 0.5f, 8f), new Vector2(buttonWidth - 24f, 34f), 26, TextAnchor.MiddleLeft);
         saveHeader.fontStyle = FontStyle.Bold;
 
         saveListRoot = CreateUiObject("SaveList", playSubmenuRoot).GetComponent<RectTransform>();
-        saveListRoot.anchorMin = new Vector2(0.5f, 0.5f);
-        saveListRoot.anchorMax = new Vector2(0.5f, 0.5f);
-        saveListRoot.pivot = new Vector2(0.5f, 1f);
-        saveListRoot.sizeDelta = new Vector2(390f, 94f);
-        saveListRoot.anchoredPosition = new Vector2(0f, -14f);
+        saveListRoot.anchorMin = new Vector2(0f, 0.5f);
+        saveListRoot.anchorMax = new Vector2(0f, 0.5f);
+        saveListRoot.pivot = new Vector2(0f, 1f);
+        saveListRoot.sizeDelta = new Vector2(buttonWidth - 24f, 94f);
+        saveListRoot.anchoredPosition = new Vector2(12f, -14f);
 
-        Button settingsButton = CreateMenuButton(menuRoot, "Settings", new Vector2(0f, 40f), new Vector2(430f, 76f), 42);
+        settingsButton = CreateMenuButton(menuRoot, "Settings", new Vector2(buttonWidth * 0.5f, 40f), new Vector2(buttonWidth, 76f), 42);
         settingsButton.onClick.AddListener(() => ShowNotice("Settings coming soon."));
 
-        Button creditsButton = CreateMenuButton(menuRoot, "Credits", new Vector2(0f, -60f), new Vector2(430f, 76f), 42);
+        creditsButton = CreateMenuButton(menuRoot, "Credits", new Vector2(buttonWidth * 0.5f, -60f), new Vector2(buttonWidth, 76f), 42);
         creditsButton.onClick.AddListener(() => ShowNotice("Credits coming soon."));
 
-        Button exitButton = CreateMenuButton(menuRoot, "Exit", new Vector2(0f, -160f), new Vector2(430f, 76f), 42);
+        exitButton = CreateMenuButton(menuRoot, "Exit", new Vector2(buttonWidth * 0.5f, -160f), new Vector2(buttonWidth, 76f), 42);
         exitButton.onClick.AddListener(ExitGame);
 
         noticeText = CreateLabel(canvasRect, string.Empty, new Vector2(0f, 26f), new Vector2(1500f, 56f), 28, TextAnchor.MiddleCenter);
@@ -374,6 +407,7 @@ public class MainMenuBootstrap : MonoBehaviour
     private void BuildEmergencyMenuUi()
     {
         EnsureEventSystem();
+        EnsureMenuCamera();
 
         GameObject canvasGo = new GameObject("MainMenuCanvasEmergency", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         runtimeObjects.Add(canvasGo);
@@ -397,10 +431,6 @@ public class MainMenuBootstrap : MonoBehaviour
         StretchRect(bg.rectTransform);
         bg.color = new Color(0f, 0f, 0f, 0.88f);
 
-        Text title = CreateLabel(root, "RIFTBORN", new Vector2(0f, 140f), new Vector2(1000f, 120f), 96, TextAnchor.MiddleCenter);
-        title.fontStyle = FontStyle.Bold;
-        AddOutline(title.gameObject, new Color(0f, 0f, 0f, 1f), new Vector2(3f, -3f));
-
         Button newGameButton = CreateMenuButton(root, "New Game", new Vector2(0f, 10f), new Vector2(420f, 76f), 38);
         newGameButton.onClick.AddListener(StartNewGame);
 
@@ -419,6 +449,10 @@ public class MainMenuBootstrap : MonoBehaviour
         }
 
 #if UNITY_EDITOR
+        if (menuPanelFrame == null)
+        {
+            menuPanelFrame = AssetDatabase.LoadAssetAtPath<Sprite>(MenuPanelFramePath);
+        }
         if (menuButtonNormal == null)
         {
             menuButtonNormal = AssetDatabase.LoadAssetAtPath<Sprite>(MenuButtonNormalPath);
@@ -465,19 +499,21 @@ public class MainMenuBootstrap : MonoBehaviour
         rt.sizeDelta = size;
 
         Image image = go.AddComponent<Image>();
+        Color accentYellow = new Color(0.96f, 0.83f, 0.25f, 1f);
         if (menuButtonNormal != null)
         {
             image.sprite = menuButtonNormal;
             image.type = menuButtonNormal.border.sqrMagnitude > 0f ? Image.Type.Sliced : Image.Type.Simple;
-            image.color = Color.white;
+            image.color = accentYellow;
         }
         else
         {
-            image.color = new Color(0f, 0f, 0f, 0.66f);
+            image.color = accentYellow;
         }
 
         Button button = go.AddComponent<Button>();
         button.targetGraphic = image;
+        button.transition = Selectable.Transition.SpriteSwap;
 
         SpriteState state = button.spriteState;
         state.highlightedSprite = menuButtonHighlight != null ? menuButtonHighlight : menuButtonNormal;
@@ -496,8 +532,11 @@ public class MainMenuBootstrap : MonoBehaviour
 
         Text text = CreateLabel(rt, label, Vector2.zero, size, fontSize, TextAnchor.MiddleCenter);
         text.fontStyle = FontStyle.Bold;
-        text.color = Color.white;
+        text.color = new Color(0.12f, 0.10f, 0.05f, 1f);
         AddOutline(text.gameObject, new Color(0f, 0f, 0f, 0.9f), new Vector2(2f, -2f));
+
+        if (go.GetComponent<UIButtonSfxReceiver>() == null) go.AddComponent<UIButtonSfxReceiver>();
+        if (go.GetComponent<MenuButtonPressAnimator>() == null) go.AddComponent<MenuButtonPressAnimator>();
         return button;
     }
 
@@ -525,11 +564,19 @@ public class MainMenuBootstrap : MonoBehaviour
         if (playSubmenuRoot == null) return;
         bool next = !playSubmenuRoot.gameObject.activeSelf;
         playSubmenuRoot.gameObject.SetActive(next);
+        SetPrimaryMenuButtonsVisible(!next);
         if (next)
         {
             RefreshSavedGamesList();
             ShowNotice(string.Empty);
         }
+    }
+
+    private void SetPrimaryMenuButtonsVisible(bool visible)
+    {
+        if (settingsButton != null) settingsButton.gameObject.SetActive(visible);
+        if (creditsButton != null) creditsButton.gameObject.SetActive(visible);
+        if (exitButton != null) exitButton.gameObject.SetActive(visible);
     }
 
     private void RefreshSavedGamesList()
@@ -587,7 +634,8 @@ public class MainMenuBootstrap : MonoBehaviour
         float spacing = 30f;
         int idx = saveEntryLabels.Count;
 
-        Text label = CreateLabel(saveListRoot, content, new Vector2(0f, startY - (idx * spacing)), new Vector2(390f, 28f), 22, TextAnchor.MiddleLeft);
+        float width = saveListRoot != null ? Mathf.Max(120f, saveListRoot.rect.width) : 390f;
+        Text label = CreateLabel(saveListRoot, content, new Vector2(width * 0.5f, startY - (idx * spacing)), new Vector2(width, 28f), 22, TextAnchor.MiddleLeft);
         label.color = new Color(1f, 1f, 1f, 0.90f);
         saveEntryLabels.Add(label);
         return label;
@@ -603,6 +651,7 @@ public class MainMenuBootstrap : MonoBehaviour
     {
         sessionStarted = true;
         menuActive = false;
+        ApplyMenuPauseState(false);
         if (menuCanvas != null) menuCanvas.enabled = false;
 
         AsyncOperation loadOp = null;
@@ -627,6 +676,15 @@ public class MainMenuBootstrap : MonoBehaviour
 
         CleanupRuntimeMenuObjects();
         Destroy(gameObject);
+    }
+
+    private void OnDestroy()
+    {
+        if (instance == this)
+        {
+            ApplyMenuPauseState(false);
+            instance = null;
+        }
     }
 
     private void CleanupRuntimeMenuObjects()
