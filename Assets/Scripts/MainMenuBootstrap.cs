@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
@@ -20,7 +19,6 @@ public class MainMenuBootstrap : MonoBehaviour
     private const string MenuButtonNormalPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_1.png";
     private const string MenuButtonHighlightPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_2.png";
     private const string MenuButtonPressedPath = "Assets/Complete_UI_Essential_Pack_Free/01_Flat_Theme/Sprites/UI_Flat_Button01a_3.png";
-    private const string SaveFolderName = "Saves";
 
     private static MainMenuBootstrap instance;
     private static bool sessionStarted;
@@ -34,9 +32,7 @@ public class MainMenuBootstrap : MonoBehaviour
     private Scene runtimeMenuScene;
     private Canvas menuCanvas;
     private RectTransform playSubmenuRoot;
-    private RectTransform saveListRoot;
     private Text noticeText;
-    private readonly List<Text> saveEntryLabels = new List<Text>(32);
     private readonly List<GameObject> runtimeObjects = new List<GameObject>(32);
     private readonly List<EventSystemState> suspendedEventSystems = new List<EventSystemState>(4);
 
@@ -337,7 +333,8 @@ public class MainMenuBootstrap : MonoBehaviour
         Image dim = dimGo.AddComponent<Image>();
         RectTransform dimRect = dim.rectTransform;
         StretchRect(dimRect);
-        dim.color = new Color(0f, 0f, 0f, 0.16f);
+        // Keep original menu art colors untouched.
+        dim.color = new Color(0f, 0f, 0f, 0f);
 
         GameObject leftPanelGo = CreateUiObject("MenuPanel", canvasRect);
         Image leftPanel = leftPanelGo.AddComponent<Image>();
@@ -358,45 +355,36 @@ public class MainMenuBootstrap : MonoBehaviour
         panelRect.offsetMax = Vector2.zero;
 
         RectTransform menuRoot = CreateUiObject("MenuButtons", leftPanel.rectTransform).GetComponent<RectTransform>();
-        menuRoot.anchorMin = new Vector2(0f, 0.5f);
-        menuRoot.anchorMax = new Vector2(0f, 0.5f);
-        menuRoot.pivot = new Vector2(0f, 0.5f);
-        menuRoot.sizeDelta = new Vector2(340f, 560f);
-        menuRoot.anchoredPosition = new Vector2(10f, 0f);
+        menuRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        menuRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        menuRoot.pivot = new Vector2(0.5f, 0.5f);
+        menuRoot.sizeDelta = new Vector2(320f, 560f);
+        menuRoot.anchoredPosition = Vector2.zero;
 
         const float buttonWidth = 301f; // 30% shorter than previous 430.
 
-        Button playButton = CreateMenuButton(menuRoot, "Play", new Vector2(buttonWidth * 0.5f, 190f), new Vector2(buttonWidth, 76f), 42);
+        Button playButton = CreateMenuButton(menuRoot, "Play", new Vector2(0f, 190f), new Vector2(buttonWidth, 76f), 42);
         playButton.onClick.AddListener(TogglePlaySubmenu);
 
         playSubmenuRoot = CreateUiObject("PlaySubmenu", menuRoot).GetComponent<RectTransform>();
-        playSubmenuRoot.anchorMin = new Vector2(0f, 0.5f);
-        playSubmenuRoot.anchorMax = new Vector2(0f, 0.5f);
-        playSubmenuRoot.pivot = new Vector2(0f, 0.5f);
-        playSubmenuRoot.sizeDelta = new Vector2(buttonWidth, 180f);
-        playSubmenuRoot.anchoredPosition = new Vector2(0f, 70f);
+        playSubmenuRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        playSubmenuRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        playSubmenuRoot.pivot = new Vector2(0.5f, 0.5f);
+        playSubmenuRoot.sizeDelta = new Vector2(buttonWidth, 90f);
+        playSubmenuRoot.anchoredPosition = new Vector2(0f, 100f);
         playSubmenuRoot.gameObject.SetActive(false);
 
-        Button newGameButton = CreateMenuButton(playSubmenuRoot, "New Game", new Vector2(buttonWidth * 0.5f, 50f), new Vector2(buttonWidth - 24f, 64f), 34);
+        // Align directly with Play button, centered in the same frame.
+        Button newGameButton = CreateMenuButton(playSubmenuRoot, "New Game", Vector2.zero, new Vector2(buttonWidth, 64f), 34);
         newGameButton.onClick.AddListener(StartNewGame);
 
-        Text saveHeader = CreateLabel(playSubmenuRoot, "Saved Games", new Vector2(buttonWidth * 0.5f, 8f), new Vector2(buttonWidth - 24f, 34f), 26, TextAnchor.MiddleLeft);
-        saveHeader.fontStyle = FontStyle.Bold;
-
-        saveListRoot = CreateUiObject("SaveList", playSubmenuRoot).GetComponent<RectTransform>();
-        saveListRoot.anchorMin = new Vector2(0f, 0.5f);
-        saveListRoot.anchorMax = new Vector2(0f, 0.5f);
-        saveListRoot.pivot = new Vector2(0f, 1f);
-        saveListRoot.sizeDelta = new Vector2(buttonWidth - 24f, 94f);
-        saveListRoot.anchoredPosition = new Vector2(12f, -14f);
-
-        settingsButton = CreateMenuButton(menuRoot, "Settings", new Vector2(buttonWidth * 0.5f, 40f), new Vector2(buttonWidth, 76f), 42);
+        settingsButton = CreateMenuButton(menuRoot, "Settings", new Vector2(0f, 40f), new Vector2(buttonWidth, 76f), 42);
         settingsButton.onClick.AddListener(() => ShowNotice("Settings coming soon."));
 
-        creditsButton = CreateMenuButton(menuRoot, "Credits", new Vector2(buttonWidth * 0.5f, -60f), new Vector2(buttonWidth, 76f), 42);
+        creditsButton = CreateMenuButton(menuRoot, "Credits", new Vector2(0f, -60f), new Vector2(buttonWidth, 76f), 42);
         creditsButton.onClick.AddListener(() => ShowNotice("Credits coming soon."));
 
-        exitButton = CreateMenuButton(menuRoot, "Exit", new Vector2(buttonWidth * 0.5f, -160f), new Vector2(buttonWidth, 76f), 42);
+        exitButton = CreateMenuButton(menuRoot, "Exit", new Vector2(0f, -160f), new Vector2(buttonWidth, 76f), 42);
         exitButton.onClick.AddListener(ExitGame);
 
         noticeText = CreateLabel(canvasRect, string.Empty, new Vector2(0f, 26f), new Vector2(1500f, 56f), 28, TextAnchor.MiddleCenter);
@@ -565,11 +553,7 @@ public class MainMenuBootstrap : MonoBehaviour
         bool next = !playSubmenuRoot.gameObject.activeSelf;
         playSubmenuRoot.gameObject.SetActive(next);
         SetPrimaryMenuButtonsVisible(!next);
-        if (next)
-        {
-            RefreshSavedGamesList();
-            ShowNotice(string.Empty);
-        }
+        if (next) ShowNotice(string.Empty);
     }
 
     private void SetPrimaryMenuButtonsVisible(bool visible)
@@ -577,68 +561,6 @@ public class MainMenuBootstrap : MonoBehaviour
         if (settingsButton != null) settingsButton.gameObject.SetActive(visible);
         if (creditsButton != null) creditsButton.gameObject.SetActive(visible);
         if (exitButton != null) exitButton.gameObject.SetActive(visible);
-    }
-
-    private void RefreshSavedGamesList()
-    {
-        if (saveListRoot == null) return;
-
-        for (int i = 0; i < saveEntryLabels.Count; i++)
-        {
-            if (saveEntryLabels[i] != null)
-            {
-                Destroy(saveEntryLabels[i].gameObject);
-            }
-        }
-        saveEntryLabels.Clear();
-
-        List<string> files = new List<string>(64);
-        string saveRoot = Path.Combine(Application.persistentDataPath, SaveFolderName);
-        if (Directory.Exists(saveRoot))
-        {
-            AddFiles(files, saveRoot, "*.save");
-            AddFiles(files, saveRoot, "*.sav");
-            AddFiles(files, saveRoot, "*.json");
-            files.Sort(StringComparer.OrdinalIgnoreCase);
-        }
-
-        if (files.Count == 0)
-        {
-            Text t = CreateSaveListLabel("(No saved games yet)");
-            t.color = new Color(1f, 1f, 1f, 0.72f);
-            return;
-        }
-
-        int count = Mathf.Min(3, files.Count);
-        for (int i = 0; i < count; i++)
-        {
-            string f = files[i];
-            string name = Path.GetFileNameWithoutExtension(f);
-            string stamp = File.GetLastWriteTime(f).ToString("yyyy-MM-dd HH:mm");
-            CreateSaveListLabel(name + "  -  " + stamp);
-        }
-    }
-
-    private static void AddFiles(List<string> list, string root, string pattern)
-    {
-        string[] matches = Directory.GetFiles(root, pattern, SearchOption.TopDirectoryOnly);
-        for (int i = 0; i < matches.Length; i++)
-        {
-            list.Add(matches[i]);
-        }
-    }
-
-    private Text CreateSaveListLabel(string content)
-    {
-        float startY = -14f;
-        float spacing = 30f;
-        int idx = saveEntryLabels.Count;
-
-        float width = saveListRoot != null ? Mathf.Max(120f, saveListRoot.rect.width) : 390f;
-        Text label = CreateLabel(saveListRoot, content, new Vector2(width * 0.5f, startY - (idx * spacing)), new Vector2(width, 28f), 22, TextAnchor.MiddleLeft);
-        label.color = new Color(1f, 1f, 1f, 0.90f);
-        saveEntryLabels.Add(label);
-        return label;
     }
 
     private void StartNewGame()
