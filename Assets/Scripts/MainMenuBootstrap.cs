@@ -23,10 +23,12 @@ public class MainMenuBootstrap : MonoBehaviour
 
     private static MainMenuBootstrap instance;
     private static bool sessionStarted;
+    public static bool IsMenuOpen => instance != null && !sessionStarted;
 
     private string gameplayScenePath;
     private string gameplaySceneName;
     private int gameplaySceneBuildIndex = -1;
+    private bool menuInitialized;
 
     private Scene runtimeMenuScene;
     private Canvas menuCanvas;
@@ -67,16 +69,21 @@ public class MainMenuBootstrap : MonoBehaviour
     }
 #endif
 
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    private static void EnsureInstance()
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void EnsureInstanceBeforeSceneLoad()
     {
-        // Recover when Enter Play Mode uses disabled domain reload:
-        // static bool can remain true from prior session while instance is gone.
-        if (sessionStarted && instance == null)
-        {
-            sessionStarted = false;
-        }
+        EnsureInstanceInternal();
+    }
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    private static void EnsureInstanceAfterSceneLoad()
+    {
+        EnsureInstanceInternal();
+    }
+
+    private static void EnsureInstanceInternal()
+    {
+        if (sessionStarted && instance == null) sessionStarted = false;
         if (sessionStarted) return;
         if (instance != null) return;
 
@@ -106,11 +113,32 @@ public class MainMenuBootstrap : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
+        StartCoroutine(InitializeMenuWhenGameplaySceneReady());
+    }
 
-        CaptureGameplaySceneReference();
+    private IEnumerator InitializeMenuWhenGameplaySceneReady()
+    {
+        if (menuInitialized) yield break;
+
+        Scene gameplayScene = default;
+        while (true)
+        {
+            Scene active = SceneManager.GetActiveScene();
+            if (active.IsValid() && active.isLoaded && !string.Equals(active.name, RuntimeMenuSceneName, StringComparison.Ordinal))
+            {
+                gameplayScene = active;
+                break;
+            }
+            yield return null;
+        }
+
+        if (sessionStarted) yield break;
+
+        CaptureGameplaySceneReferenceFromScene(gameplayScene);
         EnsureRuntimeMenuScene();
         BuildMenuUi();
-        StartCoroutine(EnterMenuStateRoutine());
+        menuInitialized = true;
+        yield return StartCoroutine(EnterMenuStateRoutine());
     }
 
     private IEnumerator EnterMenuStateRoutine()
@@ -125,9 +153,8 @@ public class MainMenuBootstrap : MonoBehaviour
         }
     }
 
-    private void CaptureGameplaySceneReference()
+    private void CaptureGameplaySceneReferenceFromScene(Scene active)
     {
-        Scene active = SceneManager.GetActiveScene();
         if (!active.IsValid())
         {
             gameplayScenePath = string.Empty;

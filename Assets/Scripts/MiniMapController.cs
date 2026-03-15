@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 
 [DisallowMultipleComponent]
@@ -38,6 +39,7 @@ public class MiniMapController : MonoBehaviour
     public bool hideDuringEngagedBattle = true;
 
     private const string RootName = "__MiniMapUI";
+    private const string CanvasName = "__MiniMapCanvas";
     private const string CameraName = "__MiniMapCamera";
 
     private Camera minimapCamera;
@@ -76,6 +78,12 @@ public class MiniMapController : MonoBehaviour
 
     void LateUpdate()
     {
+        if (MainMenuBootstrap.IsMenuOpen || string.Equals(SceneManager.GetActiveScene().name, "__RuntimeMainMenuScene", System.StringComparison.Ordinal))
+        {
+            SetMiniMapVisible(false);
+            return;
+        }
+
         if (!initialized)
         {
             EnsureInitialized();
@@ -134,16 +142,40 @@ public class MiniMapController : MonoBehaviour
 
     void EnsureCanvas()
     {
-        if (canvas != null) return;
-        canvas = FindFirstObjectByType<Canvas>();
-        if (canvas != null) return;
+        if (canvas != null)
+        {
+            EnsureCanvasIsOverlay(canvas);
+            return;
+        }
 
-        GameObject go = new GameObject("HUDCanvas");
+        GameObject existing = GameObject.Find(CanvasName);
+        if (existing != null)
+        {
+            canvas = existing.GetComponent<Canvas>();
+            if (canvas == null) canvas = existing.AddComponent<Canvas>();
+            EnsureCanvasIsOverlay(canvas);
+            return;
+        }
+
+        GameObject go = new GameObject(CanvasName);
         canvas = go.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         go.AddComponent<CanvasScaler>();
         go.AddComponent<GraphicRaycaster>();
+        EnsureCanvasIsOverlay(canvas);
         createdCanvasAtRuntime = true;
+    }
+
+    void EnsureCanvasIsOverlay(Canvas targetCanvas)
+    {
+        if (targetCanvas == null) return;
+        targetCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        targetCanvas.sortingOrder = Mathf.Max(targetCanvas.sortingOrder, 320);
+        CanvasScaler scaler = targetCanvas.GetComponent<CanvasScaler>();
+        if (scaler == null) scaler = targetCanvas.gameObject.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        scaler.matchWidthOrHeight = 0.5f;
     }
 
     void EnsureMinimapCamera()
